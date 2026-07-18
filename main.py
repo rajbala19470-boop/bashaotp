@@ -1,4 +1,4 @@
-# main.py (fixed missing import)
+# main.py (Fixed missing import, improved logging, fixed country display without code, and fixed number format without +)
 
 import asyncio
 import os
@@ -21,7 +21,11 @@ from basha import (
     fresh_login, scrape_messages, format_number
 )
 
-logging.basicConfig(level=logging.INFO)
+# Configure detailed logging for debugging
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
 browser = None
@@ -29,49 +33,71 @@ context = None
 
 # ----- Admin Commands -----
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS:
+    user_id = update.effective_user.id
+    logger.info(f"/start command from user {user_id}")
+    if user_id not in ADMIN_IDS:
+        logger.warning(f"Unauthorized /start attempt by {user_id}")
         return
     await update.message.reply_text("Bot is running.")
 
 async def country_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS:
+    user_id = update.effective_user.id
+    logger.info(f"/country command received from {user_id}, args={context.args}")
+    if user_id not in ADMIN_IDS:
+        logger.warning(f"Unauthorized /country attempt by {user_id}")
         return
+
     if not context.args:
         await update.message.reply_text("Send: CountryName|EmojiID\nExample: Bangladesh|6204108584381322968")
         return
+
     input_text = " ".join(context.args)
     parts = input_text.split("|")
     if len(parts) != 2:
         await update.message.reply_text("Invalid format. Use CountryName|EmojiID")
         return
+
     country_name = parts[0].strip().upper()
     emoji_id = parts[1].strip()
+    logger.info(f"Updating country {country_name} with emoji_id {emoji_id}")
 
+    # Update database
     update_country_emoji(country_name, emoji_id)
 
+    # Fetch country flag
     countries = get_countries()
     country_info = next((c for c in countries if c["name"].upper() == country_name), None)
     flag = country_info["flag"] if country_info else "🏳"
+    logger.info(f"Country info found: {country_info}")
 
+    # Success reply with custom emoji
     reply_text = (
         f'<tg-emoji emoji-id="{emoji_id}">{flag}</tg-emoji> Is added '
         f'<tg-emoji emoji-id="{EMOJI["SUCCESS"]}">✅</tg-emoji>'
     )
     await update.message.reply_text(reply_text, parse_mode="HTML")
+    logger.info(f"Sent success reply for country {country_name}")
 
 async def service_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS:
+    user_id = update.effective_user.id
+    logger.info(f"/service command received from {user_id}, args={context.args}")
+    if user_id not in ADMIN_IDS:
+        logger.warning(f"Unauthorized /service attempt by {user_id}")
         return
+
     if not context.args:
         await update.message.reply_text("Send: ServiceName|EmojiID\nExample: WhatsApp|6204108584381322968")
         return
+
     input_text = " ".join(context.args)
     parts = input_text.split("|")
     if len(parts) != 2:
         await update.message.reply_text("Invalid format. Use ServiceName|EmojiID")
         return
+
     service_name = parts[0].strip().capitalize()
     emoji_id = parts[1].strip()
+    logger.info(f"Updating service {service_name} with emoji_id {emoji_id}")
 
     update_service_emoji(service_name, emoji_id)
 
@@ -80,6 +106,7 @@ async def service_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f'<tg-emoji emoji-id="{EMOJI["SUCCESS"]}">✅</tg-emoji>'
     )
     await update.message.reply_text(reply_text, parse_mode="HTML")
+    logger.info(f"Sent success reply for service {service_name}")
 
 # ----- Browser & Monitor -----
 async def start_browser():
@@ -118,6 +145,7 @@ async def monitor_loop(application: Application):
                 if not msg.get("otp"):
                     continue
 
+                # --- Country display (flag/emoji + name, no code) ---
                 country_name = msg["country"].upper()
                 countries = get_countries()
                 country_info = next((c for c in countries if c["name"].upper() == country_name), None)
@@ -125,12 +153,13 @@ async def monitor_loop(application: Application):
                     flag = country_info["flag"]
                     emoji_id = country_info.get("emoji_id")
                     if emoji_id:
-                        country_display = f'<tg-emoji emoji-id="{emoji_id}">{flag}</tg-emoji> {country_info["name"]} {country_info["country_code"]}'
+                        country_display = f'<tg-emoji emoji-id="{emoji_id}">{flag}</tg-emoji> {country_info["name"]}'
                     else:
-                        country_display = f'{flag} {country_info["name"]} {country_info["country_code"]}'
+                        country_display = f'{flag} {country_info["name"]}'
                 else:
                     country_display = country_name
 
+                # --- Service display ---
                 service_name = msg["service"].capitalize()
                 services = get_services()
                 service_info = next((s for s in services if s["name"].lower() == service_name.lower()), None)
@@ -139,12 +168,17 @@ async def monitor_loop(application: Application):
                 else:
                     service_display = f'#{service_name}'
 
+                # --- Masked number without leading + ---
                 prefix, suffix = format_number(msg["number"])
+                # Remove leading +
+                prefix_clean = prefix.lstrip("+")
                 separator_id = EMOJI["SEPARATOR"]
-                masked_number = f'{prefix}<tg-emoji emoji-id="{separator_id}">➖</tg-emoji>{suffix}'
+                masked_number = f'{prefix_clean}<tg-emoji emoji-id="{separator_id}">➖</tg-emoji>{suffix}'
 
+                # Final text: line1 = 📞 COUNTRY | SERVICE, line2 = masked number
                 text = f'📞 {country_display} | {service_display}\n{masked_number}'
 
+                # Buttons
                 otp_btn = InlineKeyboardButton(
                     "𝐎𝐓𝐏",
                     copy_text=CopyTextButton(text=msg["otp"]),
