@@ -1,7 +1,7 @@
-# main.py (Updated with confirmation replies using custom emojis)
+# main.py (fixed missing import)
 
 import asyncio
-import sys
+import os
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CopyTextButton
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -47,15 +47,12 @@ async def country_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     country_name = parts[0].strip().upper()
     emoji_id = parts[1].strip()
 
-    # Update database
     update_country_emoji(country_name, emoji_id)
 
-    # Fetch country info for flag fallback
     countries = get_countries()
     country_info = next((c for c in countries if c["name"].upper() == country_name), None)
     flag = country_info["flag"] if country_info else "🏳"
 
-    # Build reply with custom emoji and success emoji
     reply_text = (
         f'<tg-emoji emoji-id="{emoji_id}">{flag}</tg-emoji> Is added '
         f'<tg-emoji emoji-id="{EMOJI["SUCCESS"]}">✅</tg-emoji>'
@@ -76,10 +73,8 @@ async def service_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     service_name = parts[0].strip().capitalize()
     emoji_id = parts[1].strip()
 
-    # Update database
     update_service_emoji(service_name, emoji_id)
 
-    # Build reply with custom emoji (using generic 🔧 as fallback)
     reply_text = (
         f'<tg-emoji emoji-id="{emoji_id}">🔧</tg-emoji> Is added '
         f'<tg-emoji emoji-id="{EMOJI["SUCCESS"]}">✅</tg-emoji>'
@@ -123,7 +118,6 @@ async def monitor_loop(application: Application):
                 if not msg.get("otp"):
                     continue
 
-                # Country info
                 country_name = msg["country"].upper()
                 countries = get_countries()
                 country_info = next((c for c in countries if c["name"].upper() == country_name), None)
@@ -137,7 +131,6 @@ async def monitor_loop(application: Application):
                 else:
                     country_display = country_name
 
-                # Service info
                 service_name = msg["service"].capitalize()
                 services = get_services()
                 service_info = next((s for s in services if s["name"].lower() == service_name.lower()), None)
@@ -146,14 +139,12 @@ async def monitor_loop(application: Application):
                 else:
                     service_display = f'#{service_name}'
 
-                # Number masking
                 prefix, suffix = format_number(msg["number"])
                 separator_id = EMOJI["SEPARATOR"]
                 masked_number = f'{prefix}<tg-emoji emoji-id="{separator_id}">➖</tg-emoji>{suffix}'
 
                 text = f'📞 {country_display} | {service_display}\n{masked_number}'
 
-                # Buttons
                 otp_btn = InlineKeyboardButton(
                     "𝐎𝐓𝐏",
                     copy_text=CopyTextButton(text=msg["otp"]),
