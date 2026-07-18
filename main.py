@@ -1,4 +1,5 @@
-# main.py (Event Loop Fix)
+# main.py (Updated with confirmation replies using custom emojis)
+
 import asyncio
 import sys
 import logging
@@ -23,11 +24,10 @@ from basha import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Global browser and context (filled later)
 browser = None
 context = None
 
-# Admin commands (same as before)
+# ----- Admin Commands -----
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
         return
@@ -46,8 +46,21 @@ async def country_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     country_name = parts[0].strip().upper()
     emoji_id = parts[1].strip()
+
+    # Update database
     update_country_emoji(country_name, emoji_id)
-    await update.message.reply_text(f"Updated {country_name} emoji ID to {emoji_id}")
+
+    # Fetch country info for flag fallback
+    countries = get_countries()
+    country_info = next((c for c in countries if c["name"].upper() == country_name), None)
+    flag = country_info["flag"] if country_info else "🏳"
+
+    # Build reply with custom emoji and success emoji
+    reply_text = (
+        f'<tg-emoji emoji-id="{emoji_id}">{flag}</tg-emoji> Is added '
+        f'<tg-emoji emoji-id="{EMOJI["SUCCESS"]}">✅</tg-emoji>'
+    )
+    await update.message.reply_text(reply_text, parse_mode="HTML")
 
 async def service_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
@@ -62,15 +75,22 @@ async def service_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     service_name = parts[0].strip().capitalize()
     emoji_id = parts[1].strip()
-    update_service_emoji(service_name, emoji_id)
-    await update.message.reply_text(f"Updated {service_name} emoji ID to {emoji_id}")
 
-# ---------- BROWSER & MONITOR ----------
+    # Update database
+    update_service_emoji(service_name, emoji_id)
+
+    # Build reply with custom emoji (using generic 🔧 as fallback)
+    reply_text = (
+        f'<tg-emoji emoji-id="{emoji_id}">🔧</tg-emoji> Is added '
+        f'<tg-emoji emoji-id="{EMOJI["SUCCESS"]}">✅</tg-emoji>'
+    )
+    await update.message.reply_text(reply_text, parse_mode="HTML")
+
+# ----- Browser & Monitor -----
 async def start_browser():
     global browser, context
     playwright = await async_playwright().start()
     browser = await playwright.chromium.launch(headless=True, args=["--no-sandbox"])
-    import os
     if os.path.exists("basha_cookie.json"):
         context = await create_context(browser)
     else:
@@ -92,7 +112,6 @@ async def ensure_logged_in():
         await page.close()
 
 async def monitor_loop(application: Application):
-    """Continuously scrape and send new OTP messages."""
     global context
     while True:
         try:
@@ -103,7 +122,8 @@ async def monitor_loop(application: Application):
                     continue
                 if not msg.get("otp"):
                     continue
-                # Build message (same logic as before)
+
+                # Country info
                 country_name = msg["country"].upper()
                 countries = get_countries()
                 country_info = next((c for c in countries if c["name"].upper() == country_name), None)
@@ -117,6 +137,7 @@ async def monitor_loop(application: Application):
                 else:
                     country_display = country_name
 
+                # Service info
                 service_name = msg["service"].capitalize()
                 services = get_services()
                 service_info = next((s for s in services if s["name"].lower() == service_name.lower()), None)
@@ -125,13 +146,14 @@ async def monitor_loop(application: Application):
                 else:
                     service_display = f'#{service_name}'
 
+                # Number masking
                 prefix, suffix = format_number(msg["number"])
-                separator_id = EMOJI.get("SEPARATOR", "6204108584381322968")
+                separator_id = EMOJI["SEPARATOR"]
                 masked_number = f'{prefix}<tg-emoji emoji-id="{separator_id}">➖</tg-emoji>{suffix}'
 
-                line1 = f'📞 {country_display} | {service_display}'
-                text = f'{line1}\n{masked_number}'
+                text = f'📞 {country_display} | {service_display}\n{masked_number}'
 
+                # Buttons
                 otp_btn = InlineKeyboardButton(
                     "𝐎𝐓𝐏",
                     copy_text=CopyTextButton(text=msg["otp"]),
@@ -151,7 +173,10 @@ async def monitor_loop(application: Application):
                 keyboard = InlineKeyboardMarkup([[otp_btn], [channel_btn, bot_btn]])
 
                 try:
-                    await application.bot.send_message(chat_id=GROUP_ID, text=text, parse_mode="HTML", reply_markup=keyboard)
+                    await application.bot.send_message(
+                        chat_id=GROUP_ID, text=text,
+                        parse_mode="HTML", reply_markup=keyboard
+                    )
                     save_message(msg["id"])
                     logger.info(f"Sent OTP for {msg['service']} - {msg['number']}")
                 except Exception as e:
@@ -160,41 +185,27 @@ async def monitor_loop(application: Application):
             logger.error(f"Monitor loop error: {e}")
         await asyncio.sleep(POLL_TIME)
 
-# ---------- MAIN ENTRY POINT ----------
+# ----- Main -----
 def main():
-    # Initialize DB
     init_db()
-
-    # Build PTB Application (synchronous)
     application = Application.builder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("country", country_command))
     application.add_handler(CommandHandler("service", service_command))
 
-    # Get the event loop (works both v13 and v20)
     loop = asyncio.get_event_loop()
-
-    # Start browser inside the loop
     logger.info("Launching browser...")
     loop.run_until_complete(start_browser())
-
-    # Schedule the monitor loop as a background task
     loop.create_task(monitor_loop(application))
 
-    # Run the bot. In v13 this blocks forever, in v20 it must be awaited.
-    # We detect PTB version to adapt.
     try:
-        # Try async run (v20)
         if hasattr(application.run_polling, '__await__'):
-            logger.info("Running in async mode (PTB v20+)")
             loop.run_until_complete(application.run_polling(allowed_updates=Update.ALL_TYPES))
         else:
-            logger.info("Running in sync mode (PTB v13.x)")
             application.run_polling(allowed_updates=Update.ALL_TYPES)
     except KeyboardInterrupt:
         logger.info("Bot stopped by user.")
     finally:
-        # Cleanup
         if browser:
             loop.run_until_complete(browser.close())
         loop.close()
