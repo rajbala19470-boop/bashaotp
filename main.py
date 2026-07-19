@@ -1,4 +1,4 @@
-# main.py (service name hidden when custom emoji exists)
+# main.py (country ALPHA-2 short code, bold formatting)
 
 import asyncio
 import os
@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 browser = None
 context = None
 
+# ----- Admin Commands -----
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
         return
@@ -80,6 +81,7 @@ async def service_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(reply_text, parse_mode="HTML")
 
+# ----- Browser & Monitor -----
 async def start_browser():
     global browser, context
     playwright = await async_playwright().start()
@@ -116,37 +118,39 @@ async def monitor_loop(application: Application):
                 if not msg.get("otp"):
                     continue
 
-                # Custom prefix emoji
+                # Prefix emoji
                 prefix_emoji = f'<tg-emoji emoji-id="{EMOJI["PREFIX"]}">🤖</tg-emoji>'
 
-                # Country
+                # Country (ALPHA-2 + flag or custom emoji)
                 country_name = msg["country"].upper()
                 countries = get_countries()
                 country_info = next((c for c in countries if c["name"].upper() == country_name), None)
                 if country_info:
+                    iso_code = country_info["iso"]  # ALPHA-2 short code
                     flag = country_info["flag"]
                     emoji_id = country_info.get("emoji_id")
                     if emoji_id:
-                        country_display = f'<tg-emoji emoji-id="{emoji_id}">{flag}</tg-emoji> {country_info["name"]}'
+                        # custom emoji + bold ALPHA-2 code
+                        country_display = f'<tg-emoji emoji-id="{emoji_id}">{flag}</tg-emoji> <b>{iso_code}</b>'
                     else:
-                        country_display = f'{flag} {country_info["name"]}'
+                        # normal flag + bold ALPHA-2 code
+                        country_display = f'{flag} <b>{iso_code}</b>'
                 else:
-                    country_display = country_name
+                    country_display = f'<b>{country_name}</b>'
 
-                # Service (custom emoji only if available, else #ServiceName)
+                # Service
                 service_name = msg["service"].capitalize()
                 services = get_services()
                 service_info = next((s for s in services if s["name"].lower() == service_name.lower()), None)
                 if service_info and service_info.get("emoji_id"):
-                    # Only emoji, no text
                     service_display = f'<tg-emoji emoji-id="{service_info["emoji_id"]}">🔧</tg-emoji>'
                 else:
                     service_display = f'#{service_name}'
 
-                # Number
+                # Masked number (bold)
                 prefix, suffix = format_number(msg["number"])
                 separator_id = EMOJI["SEPARATOR"]
-                masked_number = f'{prefix}<tg-emoji emoji-id="{separator_id}">➖</tg-emoji>{suffix}'
+                masked_number = f'<b>{prefix}<tg-emoji emoji-id="{separator_id}">➖</tg-emoji>{suffix}</b>'
 
                 text = f'{prefix_emoji} {country_display} | {service_display}\n{masked_number}'
 
