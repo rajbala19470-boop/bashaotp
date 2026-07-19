@@ -1,4 +1,4 @@
-# emoji.py (minimal required custom emoji IDs)
+# emoji.py (updated with PREFIX emoji)
 
 EMOJI = {
     "SEPARATOR": "6307542847251814164",      # ➖ masked number separator
@@ -6,4 +6,5 @@ EMOJI = {
     "CHANNEL_BUTTON": "6204010762206189094",  # 📢 channel button
     "BOT_BUTTON": "5339267587337370029",      # 🤖 bot button
     "SUCCESS": "6205984471477393007",         # ✅ success checkmark
+    "PREFIX": "5463179970807369540"           # custom emoji before country
 }
