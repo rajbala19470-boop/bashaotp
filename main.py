@@ -1,4 +1,4 @@
-# main.py (country ALPHA-2 short code, bold formatting)
+# main.py (country ALPHA-2 short code, bold formatting + default emojis)
 
 import asyncio
 import os
@@ -29,6 +29,18 @@ logger = logging.getLogger(__name__)
 
 browser = None
 context = None
+
+# ---- DEFAULT EMOJI IDs (used when no DB entry exists) ----
+DEFAULT_EMOJIS = {
+    "services": {
+        "uber": "5298715455316303708",
+        "bolt": "5343587658717219067"
+    },
+    "countries": {
+        "kenya": "5294051631933967760",
+        "morocco": "5292108962391414885"
+    }
+}
 
 # ----- Admin Commands -----
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -129,14 +141,20 @@ async def monitor_loop(application: Application):
                     iso_code = country_info["iso"]  # ALPHA-2 short code
                     flag = country_info["flag"]
                     emoji_id = country_info.get("emoji_id")
+                    # Fallback to default emoji if no DB custom
+                    if not emoji_id and country_name.lower() in DEFAULT_EMOJIS["countries"]:
+                        emoji_id = DEFAULT_EMOJIS["countries"][country_name.lower()]
                     if emoji_id:
-                        # custom emoji + bold ALPHA-2 code (no space)
                         country_display = f'<tg-emoji emoji-id="{emoji_id}">{flag}</tg-emoji><b>{iso_code}</b>'
                     else:
-                        # normal flag + bold ALPHA-2 code (no space)
                         country_display = f'{flag}<b>{iso_code}</b>'
                 else:
-                    country_display = f'<b>{country_name}</b>'
+                    # Unknown country: try default emoji if available
+                    if country_name.lower() in DEFAULT_EMOJIS["countries"]:
+                        emoji_id = DEFAULT_EMOJIS["countries"][country_name.lower()]
+                        country_display = f'<tg-emoji emoji-id="{emoji_id}">🏳</tg-emoji><b>{country_name}</b>'
+                    else:
+                        country_display = f'<b>{country_name}</b>'
 
                 # Service
                 service_name = msg["service"].capitalize()
@@ -145,7 +163,12 @@ async def monitor_loop(application: Application):
                 if service_info and service_info.get("emoji_id"):
                     service_display = f'<tg-emoji emoji-id="{service_info["emoji_id"]}">🔧</tg-emoji>'
                 else:
-                    service_display = f'#{service_name}'
+                    # Fallback to default emoji if available
+                    if service_name.lower() in DEFAULT_EMOJIS["services"]:
+                        emoji_id = DEFAULT_EMOJIS["services"][service_name.lower()]
+                        service_display = f'<tg-emoji emoji-id="{emoji_id}">🔧</tg-emoji>'
+                    else:
+                        service_display = f'#{service_name}'
 
                 # Masked number (bold) with + prefix
                 prefix, suffix = format_number(msg["number"])
