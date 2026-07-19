@@ -1,4 +1,16 @@
-# main.py (complete final bot)
+    except Exception as e:
+        logger.error(f"Login check error: {e}")
+    finally:
+        await page.close()
+
+async def monitor_loop(application: Application):
+    global context
+    while True:
+        try:
+            await ensure_logged_in()
+            messages = await scrape_messages(context)
+            for msg in messages:
+# main.py (fixed – no fresh_login import)
 
 import asyncio
 import os
@@ -18,7 +30,8 @@ from database import (
 from emoji import EMOJI
 from basha import (
     async_playwright, create_context, check_login,
-    fresh_login, scrape_messages, format_number
+    login_and_refresh_cookies,  # <-- needed for auto‑login recovery
+    scrape_messages, format_number, cookie_refresh_loop
 )
 
 logging.basicConfig(
@@ -50,7 +63,7 @@ async def country_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     country_name = parts[0].strip().upper()
     emoji_id = parts[1].strip()
-    update_country_emoji(country_name, emoji_id)    # live update
+    update_country_emoji(country_name, emoji_id)
     countries = get_countries()
     country_info = next((c for c in countries if c["name"].upper() == country_name), None)
     flag = country_info["flag"] if country_info else "🏳"
@@ -74,7 +87,7 @@ async def service_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     service_name = parts[0].strip().capitalize()
     emoji_id = parts[1].strip()
-    update_service_emoji(service_name, emoji_id)    # live update
+    update_service_emoji(service_name, emoji_id)
     reply_text = (
         f'<tg-emoji emoji-id="{emoji_id}">🔧</tg-emoji> Is added '
         f'<tg-emoji emoji-id="{EMOJI["SUCCESS"]}">✅</tg-emoji>'
@@ -89,23 +102,23 @@ async def start_browser():
         headless=True,
         args=["--no-sandbox", "--disable-dev-shm-usage"]
     )
-    if os.path.exists("basha_cookie.json"):
-        context = await create_context(browser)
-    else:
-        logger.info("Performing fresh login...")
-        context = await fresh_login(browser)
+    context = await create_context(browser)
     logger.info("Browser ready.")
 
 async def ensure_logged_in():
     global context, browser
     page = await context.new_page()
     try:
-        await page.goto(MESSAGE_URL)
-        await asyncio.sleep(1.5)
-        if "/login" in page.url:
-            logger.info("Cookie expired, re-logging in...")
-            await context.close()
-            context = await fresh_login(browser)
+        valid = await check_login(page)
+        if not valid:
+            logger.warning("Session expired. Refreshing cookies...")
+            new_storage = await login_and_refresh_cookies(browser)
+            if new_storage:
+                old_ctx = context
+                context = await browser.new_context(storage_state=new_storage)
+                await old_ctx.close()
+            else:
+                logger.error("Cannot refresh cookies – manual login may be required.")
     except Exception as e:
         logger.error(f"Login check error: {e}")
     finally:
@@ -123,10 +136,9 @@ async def monitor_loop(application: Application):
                 if not msg.get("otp"):
                     continue
 
-                # Custom prefix emoji (e.g., robot)
                 prefix_emoji = f'<tg-emoji emoji-id="{EMOJI["PREFIX"]}">🤖</tg-emoji>'
 
-                # Country display
+                # Country
                 country_name = msg["country"].upper()
                 countries = get_countries()
                 country_info = next((c for c in countries if c["name"].upper() == country_name), None)
@@ -135,14 +147,13 @@ async def monitor_loop(application: Application):
                     flag = country_info["flag"]
                     emoji_id = country_info.get("emoji_id")
                     if emoji_id:
-                        # custom emoji + bold ISO code
                         country_display = f'<tg-emoji emoji-id="{emoji_id}">{flag}</tg-emoji> <b>{iso_code}</b>'
                     else:
                         country_display = f'{flag} <b>{iso_code}</b>'
                 else:
                     country_display = f'<b>{country_name}</b>'
 
-                # Service display
+                # Service
                 service_name = msg["service"].capitalize()
                 services = get_services()
                 service_info = next((s for s in services if s["name"].lower() == service_name.lower()), None)
@@ -151,15 +162,14 @@ async def monitor_loop(application: Application):
                 else:
                     service_display = f'#{service_name}'
 
-                # Masked number (bold, with +)
+                # Number
                 prefix, suffix = format_number(msg["number"])
                 separator_id = EMOJI["SEPARATOR"]
                 masked_number = f'<b>{prefix}<tg-emoji emoji-id="{separator_id}">➖</tg-emoji>{suffix}</b>'
 
-                # Single-line message
                 text = f'{prefix_emoji} {country_display} | {service_display} {masked_number}'
 
-                # Inline buttons
+                # Buttons
                 otp_btn = InlineKeyboardButton(
                     "𝐎𝐓𝐏",
                     copy_text=CopyTextButton(text=msg["otp"]),
@@ -204,14 +214,14 @@ def main():
     try:
         loop.run_until_complete(asyncio.wait_for(start_browser(), timeout=120.0))
     except asyncio.TimeoutError:
-        logger.error("Browser startup timed out after 2 minutes.")
-        loop.close()
+        logger.error("Browser startup timed out.")
         return
     except Exception as e:
         logger.error(f"Failed to start browser: {e}")
-        loop.close()
         return
 
+    # Start cookie refresh loop (every 12 hours)
+    loop.create_task(cookie_refresh_loop(browser))
     loop.create_task(monitor_loop(application))
 
     try:
