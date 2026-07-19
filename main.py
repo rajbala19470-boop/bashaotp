@@ -1,4 +1,4 @@
-# main.py (country ALPHA-2 short code, bold formatting)
+# main.py (single-line format, number with + sign)
 
 import asyncio
 import os
@@ -121,24 +121,22 @@ async def monitor_loop(application: Application):
                 # Prefix emoji
                 prefix_emoji = f'<tg-emoji emoji-id="{EMOJI["PREFIX"]}">🤖</tg-emoji>'
 
-                # Country (ALPHA-2 + flag or custom emoji)
+                # Country (ALPHA-2 + flag or custom emoji, bold code)
                 country_name = msg["country"].upper()
                 countries = get_countries()
                 country_info = next((c for c in countries if c["name"].upper() == country_name), None)
                 if country_info:
-                    iso_code = country_info["iso"]  # ALPHA-2 short code
+                    iso_code = country_info["iso"]
                     flag = country_info["flag"]
                     emoji_id = country_info.get("emoji_id")
                     if emoji_id:
-                        # custom emoji + bold ALPHA-2 code
                         country_display = f'<tg-emoji emoji-id="{emoji_id}">{flag}</tg-emoji> <b>{iso_code}</b>'
                     else:
-                        # normal flag + bold ALPHA-2 code
                         country_display = f'{flag} <b>{iso_code}</b>'
                 else:
                     country_display = f'<b>{country_name}</b>'
 
-                # Service
+                # Service (only custom emoji if id exists)
                 service_name = msg["service"].capitalize()
                 services = get_services()
                 service_info = next((s for s in services if s["name"].lower() == service_name.lower()), None)
@@ -147,14 +145,15 @@ async def monitor_loop(application: Application):
                 else:
                     service_display = f'#{service_name}'
 
-                # Masked number (bold)
+                # Masked number with + sign and bold
                 prefix, suffix = format_number(msg["number"])
                 separator_id = EMOJI["SEPARATOR"]
                 masked_number = f'<b>{prefix}<tg-emoji emoji-id="{separator_id}">➖</tg-emoji>{suffix}</b>'
 
-                text = f'{prefix_emoji} {country_display} | {service_display}\n{masked_number}'
+                # Single line: prefix + country | service + number (no line break)
+                text = f'{prefix_emoji} {country_display} | {service_display} {masked_number}'
 
-                # Buttons
+                # Buttons (separate row)
                 otp_btn = InlineKeyboardButton(
                     "𝐎𝐓𝐏",
                     copy_text=CopyTextButton(text=msg["otp"]),
