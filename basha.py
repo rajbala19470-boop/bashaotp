@@ -87,19 +87,20 @@ def format_number(number):
     Formats phone number for display.
     Removes '+' and spaces, then splits:
     - prefix: first 5 digits (country code + some)
-    - suffix: last 3 digits
+    - suffix: last 4 digits
     The '+' is added back in main.py
-    Example: '+2126509559' -> ('21265', '559')
+    Example: '+880170652' -> ('88017', '0652')
+    Example: '+2126509559' -> ('21265', '9559')
     """
     # Remove '+' and any spaces
     clean = number.replace('+', '').replace(' ', '').strip()
     
     # If number is too short, return as is
-    if len(clean) < 8:
+    if len(clean) < 9:   # need at least 9 digits for 5 prefix + 4 suffix
         return clean, ''
     
-    # Take first 5 digits as prefix, last 3 digits as suffix
+    # Take first 5 digits as prefix, last 4 digits as suffix
     prefix = clean[:5]
-    suffix = clean[-3:]
+    suffix = clean[-4:]
     
     return prefix, suffix
