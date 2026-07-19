@@ -1,4 +1,4 @@
-# basha.py (improved login with stealth and robust selectors)
+# basha.py (with stealth, retries, and cookie fallback)
 
 import asyncio
 import json
@@ -14,20 +14,33 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
+# Try to import stealth; if not installed, skip
+try:
+    from playwright_stealth import stealth_async
+    HAS_STEALTH = True
+except ImportError:
+    HAS_STEALTH = False
+    logger.warning("playwright-stealth not installed; Cloudflare may block the bot.")
+    logger.warning("Install it with: pip install playwright-stealth")
+
 async def login_and_save_state(context, page):
     try:
         logger.info("Navigating to login page...")
-        await page.goto(LOGIN_URL, timeout=60000)
-        # Wait for page to be ready (networkidle or a known element)
-        await page.wait_for_load_state("networkidle")
-        # Sometimes the page takes extra time to render the form; wait for any input field
+        await page.goto(LOGIN_URL, timeout=60000, wait_until="domcontentloaded")
+        # Apply stealth if available
+        if HAS_STEALTH:
+            await stealth_async(page)
+            logger.info("Stealth applied.")
+        # Wait for any input field to appear, with a longer timeout
         try:
-            await page.wait_for_selector('input', timeout=15000)
+            await page.wait_for_selector('input', timeout=30000)
         except PlaywrightTimeoutError:
-            logger.warning("No input field appeared after 15s – maybe Cloudflare challenge?")
+            logger.warning("No input field after 30s. Saving screenshot for debug.")
             await page.screenshot(path="login_page_stuck.png")
-            raise Exception("Login page did not load properly – possible Cloudflare block")
-
+            # Maybe Cloudflare is still present; we can wait a bit more
+            await asyncio.sleep(5)
+            # Try again
+            await page.wait_for_selector('input', timeout=15000)
         logger.info(f"Login page loaded. URL: {page.url}")
 
         # Helper to find an element using multiple selectors
@@ -49,7 +62,6 @@ async def login_and_save_state(context, page):
             'input[id="email"]', '#email', 'input[type="text"][name="email"]'
         ], "Email input")
         if not email_input:
-            # Last resort: get all inputs and pick the first text/email type
             all_inputs = await page.query_selector_all('input')
             for inp in all_inputs:
                 t = await inp.get_attribute('type')
@@ -82,7 +94,6 @@ async def login_and_save_state(context, page):
             raise Exception("Could not find submit button")
         await submit_btn.click()
 
-        # Wait for navigation
         await asyncio.sleep(5)
         logger.info(f"After login, URL: {page.url}")
 
@@ -113,16 +124,25 @@ async def check_login(page):
     return "/login" not in page.url
 
 async def fresh_login(browser):
-    context = await browser.new_context()
-    page = await context.new_page()
-    try:
-        success = await login_and_save_state(context, page)
-        if not success:
-            await context.close()
-            raise Exception("Basha login failed – still on login page")
-        return context
-    finally:
-        await page.close()
+    # Retry up to 3 times with increasing delays
+    for attempt in range(3):
+        try:
+            context = await browser.new_context()
+            page = await context.new_page()
+            try:
+                success = await login_and_save_state(context, page)
+                if success:
+                    return context
+                await context.close()
+                raise Exception("Login still on /login page")
+            finally:
+                await page.close()
+        except Exception as e:
+            logger.error(f"Login attempt {attempt+1} failed: {e}")
+            if attempt < 2:
+                logger.info("Retrying in 10 seconds...")
+                await asyncio.sleep(10)
+    raise Exception("All login attempts failed.")
 
 async def scrape_messages(context):
     page = await context.new_page()
@@ -139,7 +159,6 @@ async def scrape_messages(context):
             if len(cols) < 4:
                 continue
             raw_country = cols[0].get_text(strip=True)
-            # Extract first word as country name (e.g., "KENYA 48 - KENYA" -> "KENYA")
             country = raw_country.split()[0] if raw_country else "Unknown"
             number = cols[1].get_text(strip=True)
             service = cols[2].get_text(strip=True)
@@ -162,7 +181,6 @@ async def scrape_messages(context):
         await page.close()
 
 def format_number(number):
-    # Number expected like +8801712345678; we keep prefix (first 6 chars) and suffix (last 4)
     if len(number) >= 10:
         prefix = number[:6]
         suffix = number[-4:]
