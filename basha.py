@@ -1,4 +1,4 @@
-# basha.py (with stealth, retries, and cookie fallback)
+# basha.py (optimized login: uses cookies, fallback to manual cookie creation, Cloudflare-avoidance)
 
 import asyncio
 import json
@@ -14,36 +14,39 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
-# Try to import stealth; if not installed, skip
+# Optional stealth (install with: pip install playwright-stealth)
 try:
     from playwright_stealth import stealth_async
     HAS_STEALTH = True
 except ImportError:
     HAS_STEALTH = False
-    logger.warning("playwright-stealth not installed; Cloudflare may block the bot.")
-    logger.warning("Install it with: pip install playwright-stealth")
+    logger.info("playwright-stealth not installed; may help if Cloudflare blocks login.")
 
 async def login_and_save_state(context, page):
+    """
+    Attempt to log in and save cookies.
+    Returns True if login succeeded, False otherwise.
+    """
     try:
         logger.info("Navigating to login page...")
-        await page.goto(LOGIN_URL, timeout=60000, wait_until="domcontentloaded")
-        # Apply stealth if available
+        await page.goto(LOGIN_URL, timeout=60000)
+        await page.wait_for_load_state("networkidle")
+
+        # Apply stealth if available (helps bypass some basic bot detection)
         if HAS_STEALTH:
             await stealth_async(page)
-            logger.info("Stealth applied.")
-        # Wait for any input field to appear, with a longer timeout
-        try:
-            await page.wait_for_selector('input', timeout=30000)
-        except PlaywrightTimeoutError:
-            logger.warning("No input field after 30s. Saving screenshot for debug.")
-            await page.screenshot(path="login_page_stuck.png")
-            # Maybe Cloudflare is still present; we can wait a bit more
-            await asyncio.sleep(5)
-            # Try again
-            await page.wait_for_selector('input', timeout=15000)
-        logger.info(f"Login page loaded. URL: {page.url}")
 
-        # Helper to find an element using multiple selectors
+        # Wait for any input field (Cloudflare may delay this)
+        try:
+            await page.wait_for_selector('input', timeout=20000)
+        except PlaywrightTimeoutError:
+            # Could be Cloudflare challenge – we can't solve it automatically.
+            logger.error("Login form did not appear – possible Cloudflare/Turnstile block.")
+            logger.error("Manual login required. Please open the site in a regular browser, log in, "
+                         "and save the cookies to 'basha_cookie.json' using a browser extension.")
+            return False
+
+        # Helper to find an element using multiple possible selectors
         async def find_element(selectors, label):
             for sel in selectors:
                 try:
@@ -55,13 +58,14 @@ async def login_and_save_state(context, page):
                     continue
             return None
 
-        # Email input
+        # Email field
         email_input = await find_element([
             'input[type="email"]', 'input[name="email"]',
             'input[placeholder*="email" i]', 'input[placeholder*="Email" i]',
             'input[id="email"]', '#email', 'input[type="text"][name="email"]'
         ], "Email input")
         if not email_input:
+            # Fallback: first visible text/email input
             all_inputs = await page.query_selector_all('input')
             for inp in all_inputs:
                 t = await inp.get_attribute('type')
@@ -71,9 +75,10 @@ async def login_and_save_state(context, page):
                     break
         if not email_input:
             raise Exception("Could not find email input field")
+
         await email_input.fill(EMAIL)
 
-        # Password input
+        # Password field
         password_input = await find_element([
             'input[type="password"]', 'input[name="password"]',
             'input[placeholder*="password" i]', 'input[placeholder*="Password" i]',
@@ -94,6 +99,7 @@ async def login_and_save_state(context, page):
             raise Exception("Could not find submit button")
         await submit_btn.click()
 
+        # Wait for navigation
         await asyncio.sleep(5)
         logger.info(f"After login, URL: {page.url}")
 
@@ -102,30 +108,35 @@ async def login_and_save_state(context, page):
             await context.storage_state(path=COOKIE_FILE)
             return True
         else:
-            logger.error("Login failed: still on /login page")
+            logger.error("Login failed – still on login page.")
             return False
 
     except Exception as e:
         logger.error(f"Login error: {e}")
-        raise
+        return False
 
 async def create_context(browser):
+    """Create a browser context, loading cookies if available."""
     if os.path.exists(COOKIE_FILE):
         logger.info("Loading saved cookies.")
         context = await browser.new_context(storage_state=COOKIE_FILE)
     else:
-        logger.info("No cookie file found.")
+        logger.info("No cookie file found – will try to login later.")
         context = await browser.new_context()
     return context
 
 async def check_login(page):
-    await page.goto(MESSAGE_URL)
-    await asyncio.sleep(1.5)
-    return "/login" not in page.url
+    """Check if the current session is still valid."""
+    try:
+        await page.goto(MESSAGE_URL)
+        await asyncio.sleep(1.5)
+        return "/login" not in page.url
+    except Exception:
+        return False
 
 async def fresh_login(browser):
-    # Retry up to 3 times with increasing delays
-    for attempt in range(3):
+    """Perform a fresh login, retrying up to 2 times."""
+    for attempt in range(2):
         try:
             context = await browser.new_context()
             page = await context.new_page()
@@ -134,17 +145,18 @@ async def fresh_login(browser):
                 if success:
                     return context
                 await context.close()
-                raise Exception("Login still on /login page")
+                logger.warning(f"Login attempt {attempt+1} unsuccessful.")
+                if attempt == 0:
+                    logger.info("Retrying in 10 seconds...")
+                    await asyncio.sleep(10)
             finally:
                 await page.close()
         except Exception as e:
-            logger.error(f"Login attempt {attempt+1} failed: {e}")
-            if attempt < 2:
-                logger.info("Retrying in 10 seconds...")
-                await asyncio.sleep(10)
-    raise Exception("All login attempts failed.")
+            logger.error(f"Attempt {attempt+1} crashed: {e}")
+    raise Exception("All login attempts failed. Provide a valid 'basha_cookie.json' manually.")
 
 async def scrape_messages(context):
+    """Scrape OTP messages from Basha."""
     page = await context.new_page()
     try:
         logger.info("Scraping messages...")
@@ -181,8 +193,7 @@ async def scrape_messages(context):
         await page.close()
 
 def format_number(number):
+    """Return prefix (first 6 chars) and suffix (last 4 chars) for masking."""
     if len(number) >= 10:
-        prefix = number[:6]
-        suffix = number[-4:]
-        return prefix, suffix
+        return number[:6], number[-4:]
     return number, ""
