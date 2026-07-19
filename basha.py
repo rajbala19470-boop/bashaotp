@@ -1,118 +1,116 @@
-# basha.py (improved login: robust selector, timeout handling, retries)
+# basha.py (improved login with stealth and robust selectors)
 
 import asyncio
 import json
 import re
 import hashlib
 import os
+import logging
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 from bs4 import BeautifulSoup
 from config import (
     LOGIN_URL, MESSAGE_URL, EMAIL, PASSWORD, COOKIE_FILE
 )
 
+logger = logging.getLogger(__name__)
+
 async def login_and_save_state(context, page):
-    """Perform login and save browser state to cookie file."""
     try:
+        logger.info("Navigating to login page...")
         await page.goto(LOGIN_URL, timeout=60000)
-        # Wait for page to be fully loaded
+        # Wait for page to be ready (networkidle or a known element)
         await page.wait_for_load_state("networkidle")
-        
-        # Try multiple possible selectors for email input
-        email_selectors = [
-            'input[type="email"]',
-            'input[name="email"]',
-            'input[placeholder*="email" i]',
-            'input[placeholder*="Email" i]',
-            'input[id="email"]',
-            '#email',
-        ]
-        email_input = None
-        for selector in email_selectors:
-            try:
-                email_input = await page.wait_for_selector(selector, timeout=5000)
-                if email_input:
+        # Sometimes the page takes extra time to render the form; wait for any input field
+        try:
+            await page.wait_for_selector('input', timeout=15000)
+        except PlaywrightTimeoutError:
+            logger.warning("No input field appeared after 15s – maybe Cloudflare challenge?")
+            await page.screenshot(path="login_page_stuck.png")
+            raise Exception("Login page did not load properly – possible Cloudflare block")
+
+        logger.info(f"Login page loaded. URL: {page.url}")
+
+        # Helper to find an element using multiple selectors
+        async def find_element(selectors, label):
+            for sel in selectors:
+                try:
+                    el = await page.wait_for_selector(sel, timeout=3000)
+                    if el:
+                        logger.info(f"{label} found: {sel}")
+                        return el
+                except PlaywrightTimeoutError:
+                    continue
+            return None
+
+        # Email input
+        email_input = await find_element([
+            'input[type="email"]', 'input[name="email"]',
+            'input[placeholder*="email" i]', 'input[placeholder*="Email" i]',
+            'input[id="email"]', '#email', 'input[type="text"][name="email"]'
+        ], "Email input")
+        if not email_input:
+            # Last resort: get all inputs and pick the first text/email type
+            all_inputs = await page.query_selector_all('input')
+            for inp in all_inputs:
+                t = await inp.get_attribute('type')
+                if t in ('email', 'text', None):
+                    email_input = inp
+                    logger.warning("Using fallback email input (first text input)")
                     break
-            except PlaywrightTimeoutError:
-                continue
-        
         if not email_input:
             raise Exception("Could not find email input field")
-
         await email_input.fill(EMAIL)
-        
-        # Try multiple possible selectors for password input
-        password_selectors = [
-            'input[type="password"]',
-            'input[name="password"]',
-            'input[placeholder*="password" i]',
-            'input[placeholder*="Password" i]',
-            'input[id="password"]',
-            '#password',
-        ]
-        password_input = None
-        for selector in password_selectors:
-            try:
-                password_input = await page.wait_for_selector(selector, timeout=5000)
-                if password_input:
-                    break
-            except PlaywrightTimeoutError:
-                continue
-        
+
+        # Password input
+        password_input = await find_element([
+            'input[type="password"]', 'input[name="password"]',
+            'input[placeholder*="password" i]', 'input[placeholder*="Password" i]',
+            'input[id="password"]', '#password'
+        ], "Password input")
         if not password_input:
             raise Exception("Could not find password input field")
-
         await password_input.fill(PASSWORD)
-        
-        # Try multiple possible submit button selectors
-        submit_selectors = [
-            'button[type="submit"]',
-            'input[type="submit"]',
-            'button:has-text("Login")',
-            'button:has-text("Sign in")',
-            'button:has-text("Log in")',
-            '[type="submit"]',
-        ]
-        submit_btn = None
-        for selector in submit_selectors:
-            try:
-                submit_btn = await page.wait_for_selector(selector, timeout=5000)
-                if submit_btn:
-                    break
-            except PlaywrightTimeoutError:
-                continue
-        
+
+        # Submit button
+        submit_btn = await find_element([
+            'button[type="submit"]', 'input[type="submit"]',
+            'button:has-text("Login")', 'button:has-text("Sign in")',
+            'button:has-text("Log in")', '[type="submit"]',
+            'button.btn-primary', 'button:has-text("Submit")'
+        ], "Submit button")
         if not submit_btn:
             raise Exception("Could not find submit button")
-
         await submit_btn.click()
-        
-        # Wait for login to complete
+
+        # Wait for navigation
         await asyncio.sleep(5)
-        
-        # Check if login succeeded (URL no longer contains /login)
+        logger.info(f"After login, URL: {page.url}")
+
         if "/login" not in page.url:
+            logger.info("Login successful, saving cookies.")
             await context.storage_state(path=COOKIE_FILE)
             return True
-        return False
+        else:
+            logger.error("Login failed: still on /login page")
+            return False
+
     except Exception as e:
-        # Log the error and re-raise
-        print(f"Login error: {e}")
+        logger.error(f"Login error: {e}")
         raise
 
 async def create_context(browser):
     if os.path.exists(COOKIE_FILE):
+        logger.info("Loading saved cookies.")
         context = await browser.new_context(storage_state=COOKIE_FILE)
     else:
+        logger.info("No cookie file found.")
         context = await browser.new_context()
     return context
 
 async def check_login(page):
     await page.goto(MESSAGE_URL)
     await asyncio.sleep(1.5)
-    if "/login" in page.url:
-        return False
-    return True
+    return "/login" not in page.url
 
 async def fresh_login(browser):
     context = await browser.new_context()
@@ -129,7 +127,8 @@ async def fresh_login(browser):
 async def scrape_messages(context):
     page = await context.new_page()
     try:
-        await page.goto(MESSAGE_URL)
+        logger.info("Scraping messages...")
+        await page.goto(MESSAGE_URL, timeout=30000)
         await asyncio.sleep(1.5)
         content = await page.content()
         soup = BeautifulSoup(content, 'html.parser')
@@ -139,8 +138,8 @@ async def scrape_messages(context):
             cols = row.find_all('td')
             if len(cols) < 4:
                 continue
-            # Clean country name: keep first word before any numbers/dash
             raw_country = cols[0].get_text(strip=True)
+            # Extract first word as country name (e.g., "KENYA 48 - KENYA" -> "KENYA")
             country = raw_country.split()[0] if raw_country else "Unknown"
             number = cols[1].get_text(strip=True)
             service = cols[2].get_text(strip=True)
@@ -157,11 +156,13 @@ async def scrape_messages(context):
                 "id": msg_id,
                 "otp": otp
             })
+        logger.info(f"Scraped {len(messages)} messages.")
         return messages
     finally:
         await page.close()
 
 def format_number(number):
+    # Number expected like +8801712345678; we keep prefix (first 6 chars) and suffix (last 4)
     if len(number) >= 10:
         prefix = number[:6]
         suffix = number[-4:]
