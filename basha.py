@@ -1,4 +1,4 @@
-# basha.py (Updated with country name cleaning)
+# basha.py (Updated with country name cleaning and number formatting)
 
 import asyncio
 import json
@@ -62,7 +62,6 @@ async def scrape_messages(context):
                 continue
             # Clean country name: keep first word before any numbers/dash
             raw_country = cols[0].get_text(strip=True)
-            # e.g., "KENYA 48 - KENYA" -> first token is "KENYA"
             country = raw_country.split()[0] if raw_country else "Unknown"
             number = cols[1].get_text(strip=True)
             service = cols[2].get_text(strip=True)
@@ -84,8 +83,23 @@ async def scrape_messages(context):
         await page.close()
 
 def format_number(number):
-    if len(number) >= 10:
-        prefix = number[:6]
-        suffix = number[-4:]
-        return prefix, suffix
-    return number, ""
+    """
+    Formats phone number for display.
+    Removes '+' and spaces, then splits:
+    - prefix: first 5 digits (country code + some)
+    - suffix: last 3 digits
+    The '+' is added back in main.py
+    Example: '+2126509559' -> ('21265', '559')
+    """
+    # Remove '+' and any spaces
+    clean = number.replace('+', '').replace(' ', '').strip()
+    
+    # If number is too short, return as is
+    if len(clean) < 8:
+        return clean, ''
+    
+    # Take first 5 digits as prefix, last 3 digits as suffix
+    prefix = clean[:5]
+    suffix = clean[-3:]
+    
+    return prefix, suffix
