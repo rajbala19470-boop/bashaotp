@@ -36,7 +36,6 @@ def init_db():
     # Insert default countries if table is empty
     c.execute("SELECT COUNT(*) FROM countries")
     if c.fetchone()[0] == 0:
-        # Full list of world countries (UN members, observers, and widely recognised territories)
         all_countries = [
             ("AFGHANISTAN", "AF", "+93", "🇦🇫"),
             ("ALBANIA", "AL", "+355", "🇦🇱"),
@@ -235,7 +234,6 @@ def init_db():
             ("ZAMBIA", "ZM", "+260", "🇿🇲"),
             ("ZIMBABWE", "ZW", "+263", "🇿🇼"),
         ]
-        # Insert all countries, emoji_id is NULL initially
         c.executemany(
             "INSERT INTO countries (name, iso, country_code, flag, emoji_id) VALUES (?,?,?,?, NULL)",
             all_countries
@@ -279,12 +277,18 @@ def init_db():
             ("Shopify",),
             ("Steam",),
         ]
-        # emoji_id is NULL initially
         c.executemany(
             "INSERT INTO services (name, emoji_id) VALUES (?, NULL)",
             all_services
         )
         conn.commit()
+
+    # --- Pre-set default custom emoji IDs (as given by user) ---
+    # Morocco emoji_id
+    c.execute("UPDATE countries SET emoji_id = ? WHERE name = 'MOROCCO'", ("5292108962391414885",))
+    # Bolt emoji_id
+    c.execute("UPDATE services SET emoji_id = ? WHERE name = 'Bolt'", ("5343587658717219067",))
+    conn.commit()
 
     conn.close()
 
