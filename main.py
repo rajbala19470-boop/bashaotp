@@ -130,11 +130,11 @@ async def monitor_loop(application: Application):
                     flag = country_info["flag"]
                     emoji_id = country_info.get("emoji_id")
                     if emoji_id:
-                        # custom emoji + bold ALPHA-2 code
-                        country_display = f'<tg-emoji emoji-id="{emoji_id}">{flag}</tg-emoji> <b>{iso_code}</b>'
+                        # custom emoji + bold ALPHA-2 code (no space)
+                        country_display = f'<tg-emoji emoji-id="{emoji_id}">{flag}</tg-emoji><b>{iso_code}</b>'
                     else:
-                        # normal flag + bold ALPHA-2 code
-                        country_display = f'{flag} <b>{iso_code}</b>'
+                        # normal flag + bold ALPHA-2 code (no space)
+                        country_display = f'{flag}<b>{iso_code}</b>'
                 else:
                     country_display = f'<b>{country_name}</b>'
 
@@ -147,13 +147,13 @@ async def monitor_loop(application: Application):
                 else:
                     service_display = f'#{service_name}'
 
-                # Masked number (bold)
+                # Masked number (bold) with + prefix
                 prefix, suffix = format_number(msg["number"])
                 separator_id = EMOJI["SEPARATOR"]
-                masked_number = f'<b>{prefix}<tg-emoji emoji-id="{separator_id}">➖</tg-emoji>{suffix}</b>'
+                masked_number = f'<b>+{prefix}<tg-emoji emoji-id="{separator_id}">➖</tg-emoji>{suffix}</b>'
 
-                # ---- SINGLE LINE LAYOUT ----
-                text = f'{prefix_emoji} {country_display} | {service_display} {masked_number}'
+                # ---- NO SPACE LAYOUT ----
+                text = f'{prefix_emoji}{country_display}|{service_display}{masked_number}'
 
                 # Buttons
                 otp_btn = InlineKeyboardButton(
