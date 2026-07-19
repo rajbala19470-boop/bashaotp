@@ -152,8 +152,8 @@ async def monitor_loop(application: Application):
                 separator_id = EMOJI["SEPARATOR"]
                 masked_number = f'<b>+{prefix}<tg-emoji emoji-id="{separator_id}">➖</tg-emoji>{suffix}</b>'
 
-                # ---- NO SPACE LAYOUT ----
-                text = f'{prefix_emoji}{country_display}|{service_display}{masked_number}'
+                # ---- DESIRED LAYOUT with spaces ----
+                text = f'{prefix_emoji}{country_display} | {service_display} {masked_number}'
 
                 # Buttons
                 otp_btn = InlineKeyboardButton(
