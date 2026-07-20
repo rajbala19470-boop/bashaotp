@@ -15,8 +15,8 @@ BOT_TOKEN = "8208003630:AAE9PGWAetvkB2SDcOigYS5Yjfo7UzqUvN4"
 GROUP_ID = "-1004380384761"
 API_TOKEN = "6e4b2ca76e753ac9024d3c71ca59d4e6"
 API_URL = "http://headshotsms.kdns.fr/ints/login/api/agent_sms.php"
-CHANNEL_URL = "Your Otp Channel"
-BOT_URL = "Your Num Channel"
+CHANNEL_URL = "https://t.me/RHTotp"
+BOT_URL = "http://t.me/RhtNumberRobot"
 ADMIN_IDS = [8744359777]  # আপনার টেলিগ্রাম ইউজার আইডি দিন
 
 SEEN_FILE = "sent_otps.json"
