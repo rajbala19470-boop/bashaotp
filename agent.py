@@ -4,12 +4,14 @@ import threading
 import re
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from telebot import TeleBot, types
-from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup, CopyTextButton
+from telebot.types import (
+    InlineKeyboardButton, InlineKeyboardMarkup, CopyTextButton
+)
 from flask import Flask
 
-# ================= কনফিগ (আপনার তথ্য) =================
+# ================= কনফিগারেশন =================
 BOT_TOKEN = "8208003630:AAE9PGWAetvkB2SDcOigYS5Yjfo7UzqUvN4"
 GROUP_ID = "-1004380384761"
 API_TOKEN = "6e4b2ca76e753ac9024d3c71ca59d4e6"
@@ -26,36 +28,58 @@ bot = TeleBot(BOT_TOKEN, parse_mode="HTML")
 # ================= ইমোজি আইডি =================
 EMOJI = {
     "SEPARATOR": "6307542847251814164",
+    "PREFIX": "4958725487682650920",
     "OTP_BUTTON": "6206420230269310869",
     "CHANNEL_BUTTON": "6204010762206189094",
     "BOT_BUTTON": "5339267587337370029",
-    "SUCCESS": "6205984471477393007",
-    "PREFIX": "4958725487682650920"
+    "SUCCESS": "6205984471477393007",  # ✅
 }
 
-DEFAULT_EMOJIS = {
-    "services": {
-        "uber": "5298715455316303708",
-        "bolt": "5343587658717219067"
-    },
-    "countries": {
-        "kenya": "5294051631933967760",
-        "morocco": "5292108962391414885"
-    }
+# ================= সার্ভিস ডিটেকশন প্যাটার্ন =================
+SERVICE_PATTERNS = {
+    "WhatsApp": [r'whatsapp', r'WhatsApp', r'whatsapp business', r'WhatsApp Business'],
+    "Google": [r'google', r'gmail', r'google.*verification'],
+    "Facebook": [r'facebook', r'fb', r'facebook.*code'],
+    "Instagram": [r'instagram', r'ig'],
+    "Telegram": [r'telegram', r'Telegram'],
+    "TikTok": [r'tiktok', r'tik\s*tok'],
+    "Snapchat": [r'snapchat'],
+    "Twitter": [r'twitter', r'x\s*verification'],
+    "Discord": [r'discord'],
+    "Uber": [r'uber'],
+    "Bolt": [r'bolt'],
+    "Netflix": [r'netflix'],
+    "Amazon": [r'amazon'],
+    "PayPal": [r'paypal'],
+    "Binance": [r'binance'],
+    "Coinbase": [r'coinbase'],
+    "Steam": [r'steam'],
+    "Roblox": [r'roblox'],
+    "Epic": [r'epic\s*games'],
 }
 
-# ============= ফ্লাস্ক কিপ-এলাইভ ==============
+def detect_service_from_message(message):
+    if not message:
+        return "UNKNOWN"
+    msg = message.lower()
+    for service, patterns in SERVICE_PATTERNS.items():
+        for pat in patterns:
+            if re.search(pat, msg):
+                return service
+    return "UNKNOWN"
+
+# ============= ফ্লাস্ক ==============
 app = Flask(__name__)
 @app.route("/")
 def home():
-    return "OTP Bot Running"
+    return "OK"
 
 # ============= ইমোজি ডাটা ম্যানেজমেন্ট ==============
 def load_emoji_data():
     if os.path.exists(EMOJI_DATA_FILE):
         with open(EMOJI_DATA_FILE, 'r') as f:
             return json.load(f)
-    return {"countries": {}, "services": {}}
+    return {"countries": {}}
 
 def save_emoji_data(data):
     with open(EMOJI_DATA_FILE, 'w') as f:
@@ -65,79 +89,68 @@ emoji_data = load_emoji_data()
 
 def get_country_emoji(country_name_upper):
     name_lower = country_name_upper.lower()
-    if name_lower in emoji_data["countries"]:
-        return emoji_data["countries"][name_lower]
-    if name_lower in DEFAULT_EMOJIS["countries"]:
-        return DEFAULT_EMOJIS["countries"][name_lower]
-    return None
+    country = emoji_data.get("countries", {}).get(name_lower, {})
+    return country.get("emoji_id")
 
-def get_service_emoji(service_name_capitalized):
-    name_lower = service_name_capitalized.lower()
-    if name_lower in emoji_data["services"]:
-        return emoji_data["services"][name_lower]
-    if name_lower in DEFAULT_EMOJIS["services"]:
-        return DEFAULT_EMOJIS["services"][name_lower]
-    return None
+def get_service_emoji(country_name, service_name):
+    country_lower = country_name.lower()
+    services = emoji_data.get("countries", {}).get(country_lower, {}).get("services", {})
+    return services.get(service_name.lower())
 
-# ============= OTP স্টোরেজ (নতুন লজিক সহ) ==============
-seen_dict = {}   # গ্লোবাল, শুরুতে ফাঁকা থাকবে
+# ============= OTP স্টোরেজ ==============
+seen_dict = {}
 seen_lock = threading.Lock()
 
-def load_seen_otps():
-    if os.path.exists(SEEN_FILE):
-        with open(SEEN_FILE, 'r') as f:
-            return json.load(f)
-    return {}
-
-def save_seen_otps(data):
-    with open(SEEN_FILE, 'w') as f:
-        json.dump(data, f)
-
-# প্রথম রানে সব OTP পাঠানোর জন্য ফাইল রিসেট
-def reset_seen_for_first_run():
+def reset_seen():
     global seen_dict
     seen_dict = {}
-    save_seen_otps({})   # ফাইলও ফাঁকা করে দিই
+    if os.path.exists(SEEN_FILE):
+        os.remove(SEEN_FILE)
 
 # ============= কান্ট্রি ম্যাপিং =============
 COUNTRY_CODE_MAP = {
-    "263": ("ZW", "🇿🇼", "ZIMBABWE"), "1": ("US", "🇺🇸", "USA"),
-    "52": ("MX", "🇲🇽", "MEXICO"), "58": ("VE", "🇻🇪", "VENEZUELA"),
-    "55": ("BR", "🇧🇷", "BRAZIL"), "54": ("AR", "🇦🇷", "ARGENTINA"),
-    "57": ("CO", "🇨🇴", "COLOMBIA"), "51": ("PE", "🇵🇪", "PERU"),
-    "56": ("CL", "🇨🇱", "CHILE"), "91": ("IN", "🇮🇳", "INDIA"),
-    "92": ("PK", "🇵🇰", "PAKISTAN"), "62": ("ID", "🇮🇩", "INDONESIA"),
-    "63": ("PH", "🇵🇭", "PHILIPPINES"), "84": ("VN", "🇻🇳", "VIETNAM"),
-    "66": ("TH", "🇹🇭", "THAILAND"), "60": ("MY", "🇲🇾", "MALAYSIA"),
-    "86": ("CN", "🇨🇳", "CHINA"), "81": ("JP", "🇯🇵", "JAPAN"),
-    "82": ("KR", "🇰🇷", "SOUTH KOREA"), "880": ("BD", "🇧🇩", "BANGLADESH"),
-    "94": ("LK", "🇱🇰", "SRI LANKA"), "95": ("MM", "🇲🇲", "MYANMAR"),
-    "977": ("NP", "🇳🇵", "NEPAL"), "93": ("AF", "🇦🇫", "AFGHANISTAN"),
-    "966": ("SA", "🇸🇦", "SAUDI ARABIA"), "971": ("AE", "🇦🇪", "UAE"),
-    "98": ("IR", "🇮🇷", "IRAN"), "964": ("IQ", "🇮🇶", "IRAQ"),
-    "972": ("IL", "🇮🇱", "ISRAEL"), "90": ("TR", "🇹🇷", "TURKEY"),
-    "967": ("YE", "🇾🇪", "YEMEN"), "962": ("JO", "🇯🇴", "JORDAN"),
-    "961": ("LB", "🇱🇧", "LEBANON"), "965": ("KW", "🇰🇼", "KUWAIT"),
-    "974": ("QA", "🇶🇦", "QATAR"), "973": ("BH", "🇧🇭", "BAHRAIN"),
-    "968": ("OM", "🇴🇲", "OMAN"), "44": ("GB", "🇬🇧", "UNITED KINGDOM"),
-    "7": ("RU", "🇷🇺", "RUSSIA"), "33": ("FR", "🇫🇷", "FRANCE"),
-    "49": ("DE", "🇩🇪", "GERMANY"), "39": ("IT", "🇮🇹", "ITALY"),
-    "34": ("ES", "🇪🇸", "SPAIN"), "31": ("NL", "🇳🇱", "NETHERLANDS"),
-    "48": ("PL", "🇵🇱", "POLAND"), "380": ("UA", "🇺🇦", "UKRAINE"),
-    "40": ("RO", "🇷🇴", "ROMANIA"), "32": ("BE", "🇧🇪", "BELGIUM"),
-    "46": ("SE", "🇸🇪", "SWEDEN"), "41": ("CH", "🇨🇭", "SWITZERLAND"),
-    "43": ("AT", "🇦🇹", "AUSTRIA"), "30": ("GR", "🇬🇷", "GREECE"),
-    "351": ("PT", "🇵🇹", "PORTUGAL"), "36": ("HU", "🇭🇺", "HUNGARY"),
-    "420": ("CZ", "🇨🇿", "CZECH REPUBLIC"), "994": ("AZ", "🇦🇿", "AZERBAIJAN"),
-    "995": ("GE", "🇬🇪", "GEORGIA"), "375": ("BY", "🇧🇾", "BELARUS"),
-    "234": ("NG", "🇳🇬", "NIGERIA"), "20": ("EG", "🇪🇬", "EGYPT"),
-    "27": ("ZA", "🇿🇦", "SOUTH AFRICA"), "212": ("MA", "🇲🇦", "MOROCCO"),
-    "213": ("DZ", "🇩🇿", "ALGERIA"), "254": ("KE", "🇰🇪", "KENYA"),
-    "251": ("ET", "🇪🇹", "ETHIOPIA"), "233": ("GH", "🇬🇭", "GHANA"),
-    "225": ("CI", "🇨🇮", "IVORY COAST"), "255": ("TZ", "🇹🇿", "TANZANIA"),
-    "256": ("UG", "🇺🇬", "UGANDA"), "269": ("KM", "🇰🇲", "COMOROS"),
-    "998": ("UZ", "🇺🇿", "UZBEKISTAN"), "996": ("KG", "🇰🇬", "KYRGYZSTAN"),
-    "992": ("TJ", "🇹🇯", "TAJIKISTAN"), "993": ("TM", "🇹🇲", "TURKMENISTAN"),
+    "1": ("US", "🇺🇸", "USA"),
+    "7": ("RU", "🇷🇺", "RUSSIA"),
+    "20": ("EG", "🇪🇬", "EGYPT"),
+    "27": ("ZA", "🇿🇦", "SOUTH AFRICA"),
+    "30": ("GR", "🇬🇷", "GREECE"),
+    "31": ("NL", "🇳🇱", "NETHERLANDS"),
+    "33": ("FR", "🇫🇷", "FRANCE"),
+    "34": ("ES", "🇪🇸", "SPAIN"),
+    "39": ("IT", "🇮🇹", "ITALY"),
+    "40": ("RO", "🇷🇴", "ROMANIA"),
+    "41": ("CH", "🇨🇭", "SWITZERLAND"),
+    "44": ("GB", "🇬🇧", "UNITED KINGDOM"),
+    "46": ("SE", "🇸🇪", "SWEDEN"),
+    "48": ("PL", "🇵🇱", "POLAND"),
+    "49": ("DE", "🇩🇪", "GERMANY"),
+    "52": ("MX", "🇲🇽", "MEXICO"),
+    "55": ("BR", "🇧🇷", "BRAZIL"),
+    "60": ("MY", "🇲🇾", "MALAYSIA"),
+    "63": ("PH", "🇵🇭", "PHILIPPINES"),
+    "66": ("TH", "🇹🇭", "THAILAND"),
+    "81": ("JP", "🇯🇵", "JAPAN"),
+    "82": ("KR", "🇰🇷", "SOUTH KOREA"),
+    "84": ("VN", "🇻🇳", "VIETNAM"),
+    "86": ("CN", "🇨🇳", "CHINA"),
+    "90": ("TR", "🇹🇷", "TURKEY"),
+    "91": ("IN", "🇮🇳", "INDIA"),
+    "92": ("PK", "🇵🇰", "PAKISTAN"),
+    "93": ("AF", "🇦🇫", "AFGHANISTAN"),
+    "94": ("LK", "🇱🇰", "SRI LANKA"),
+    "212": ("MA", "🇲🇦", "MOROCCO"),
+    "213": ("DZ", "🇩🇿", "ALGERIA"),
+    "234": ("NG", "🇳🇬", "NIGERIA"),
+    "251": ("ET", "🇪🇹", "ETHIOPIA"),
+    "254": ("KE", "🇰🇪", "KENYA"),
+    "263": ("ZW", "🇿🇼", "ZIMBABWE"),
+    "351": ("PT", "🇵🇹", "PORTUGAL"),
+    "380": ("UA", "🇺🇦", "UKRAINE"),
+    "880": ("BD", "🇧🇩", "BANGLADESH"),
+    "966": ("SA", "🇸🇦", "SAUDI ARABIA"),
+    "971": ("AE", "🇦🇪", "UAE"),
+    "977": ("NP", "🇳🇵", "NEPAL"),
+    "994": ("AZ", "🇦🇿", "AZERBAIJAN"),
 }
 
 def get_country_info(number):
@@ -148,83 +161,25 @@ def get_country_info(number):
             return {"iso": iso, "flag": flag, "name": name}
     return None
 
-# ============= শক্তিশালী OTP এক্সট্র্যাক্টর =============
+# ============= OTP এক্সট্র্যাক্টর =============
 def extract_otp(text):
-    if not text:
-        return None
+    if not text: return None
     text = ' '.join(text.split())
-
-    # হাইফেনযুক্ত প্যাটার্ন
-    for pat, lens in [(r'(\d{3})[-—\s](\d{3})',6), (r'(\d{2})[-—\s](\d{3})',5),
-                      (r'(\d{3})[-—\s](\d{2})',5), (r'(\d{3})[-—\s](\d{2})[-—\s](\d{2})',7),
-                      (r'(\d{4})[-—\s](\d{4})',8)]:
-        match = re.search(pat, text)
-        if match:
-            otp = ''.join(match.groups())
-            if otp.isdigit() and len(otp)==lens:
-                return otp
-
-    # কীওয়ার্ড + সংখ্যা
-    keywords = [
-        'code','is','otp','pin','verification','verification code',
-        'security code','activation code','one time password','password',
-        'code est','est','votre code','le code','código','tu código','el código',
-        'code ist','ist','ihr code','codice','il codice','código é','é',
-        'كود','رمز','كلمة المرور','كود التفعيل','کوڈ','पिन','код','пароль',
-        'kod','şifre','kode','adalah','验证码','认证码','驗證碼','コード','認証コード','인증번호','코드'
-    ]
-    for kw in keywords:
-        pattern = r'{}\s*:?\s*[#]?\s*(\d{{4,8}})'.format(re.escape(kw))
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            otp = match.group(1)
-            if 4 <= len(otp) <= 8: return otp
-        pattern = r'{}\s*:?\s*(\d{{1,4}})[-—\s](\d{{1,4}})[-—\s]?(\d{{0,4}})?'.format(re.escape(kw))
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            groups = [g for g in match.groups() if g]
-            otp = ''.join(groups)
-            if 4 <= len(otp) <= 8: return otp
-
-    # common phrases
-    phrases = [r'is\s+(\d{4,8})', r'are\s+(\d{4,8})', r':\s*(\d{4,8})', r'#\s*(\d{4,8})',
-               r'№\s*(\d{4,8})', r'code:\s*(\d{4,8})', r'code\s+(\d{4,8})',
-               r'pin:\s*(\d{4,8})', r'pin\s+(\d{4,8})', r'otp:\s*(\d{4,8})', r'otp\s+(\d{4,8})']
-    for phrase in phrases:
-        match = re.search(phrase, text, re.IGNORECASE)
-        if match and 4 <= len(match.group(1)) <= 8:
-            return match.group(1)
-
-    # standalone numbers
-    for length in [6,5,4,7,8]:
-        matches = re.findall(r'\b(\d{' + str(length) + r'})\b', text)
-        if matches: return matches[0]
-
-    # end of line
-    lines = text.split('\n')
-    for line in reversed(lines):
-        match = re.search(r'(\d{4,8})\s*$', line)
-        if match: return match.group(1)
-
-    # brackets
-    match = re.search(r'[\(\[]\s*(\d{4,8})\s*[\)\]]', text)
-    if match: return match.group(1)
-
-    # after symbol
-    match = re.search(r'[>:\-]\s*(\d{4,8})', text)
-    if match: return match.group(1)
-
-    # spaced digits
-    match = re.search(r'(\d)\s+(\d)\s+(\d)\s+(\d)\s+(\d)\s*(\d)?\s*(\d)?\s*(\d)?', text)
-    if match:
-        groups = [g for g in match.groups() if g]
-        otp = ''.join(groups)
-        if 4 <= len(otp) <= 8: return otp
-
-    # last resort
-    matches = re.findall(r'(\d{4,8})', text)
-    if matches: return max(matches, key=len)
-    return None
+    for pat, l in [(r'(\d{3})[-—\s](\d{3})',6),(r'(\d{2})[-—\s](\d{3})',5),
+                   (r'(\d{3})[-—\s](\d{2})',5),(r'(\d{3})[-—\s](\d{2})[-—\s](\d{2})',7),
+                   (r'(\d{4})[-—\s](\d{4})',8)]:
+        m = re.search(pat, text)
+        if m:
+            otp = ''.join(m.groups())
+            if otp.isdigit() and len(otp)==l: return otp
+    for kw in ['code','otp','pin','verification','код','كود','验证码']:
+        m = re.search(r'{}\s*:?\s*#?\s*(\d{{4,8}})'.format(re.escape(kw)), text, re.I)
+        if m and 4<=len(m.group(1))<=8: return m.group(1)
+    for l in [6,5,4,7,8]:
+        m = re.findall(r'\b(\d{'+str(l)+r'})\b', text)
+        if m: return m[0]
+    m = re.findall(r'(\d{4,8})', text)
+    return max(m, key=len) if m else None
 
 # ============= API পার্সার =============
 def parse_agent_sms_response(response_data):
@@ -232,79 +187,82 @@ def parse_agent_sms_response(response_data):
     if isinstance(response_data, list):
         for sms in response_data:
             if isinstance(sms, dict):
-                number = str(sms.get('phone_number', '')).strip()
-                service = str(sms.get('sender', '')).strip()
-                message = str(sms.get('message_body', '')).strip()
-                dt = str(sms.get('received_at', ''))
+                number = str(sms.get('phone_number','')).strip()
+                sender = str(sms.get('sender','')).strip()
+                message = str(sms.get('message_body','')).strip()
+                dt = str(sms.get('received_at',''))
                 if number and message:
-                    if not service:
-                        m = re.search(r'Your (\w+) verification', message, re.IGNORECASE)
-                        service = m.group(1) if m else "UNKNOWN"
-                    records.append({
-                        'service': service,
-                        'number': number,
-                        'message': message,
-                        'datetime': dt
-                    })
+                    records.append({'sender':sender,'number':number,'message':message,'datetime':dt})
     return records
 
-# ============= মেসেজ ফরম্যাটিং ও সেন্ড =============
+# ============= মেসেজ সেন্ড (নতুন স্টাইল) =============
 def send_otp_to_group(service, number, message, dt):
     try:
         otp = extract_otp(message)
-        if not otp:
-            return
+        if not otp: return
 
-        # ---- Prefix ----
-        prefix_emoji = f'<tg-emoji emoji-id="{EMOJI["PREFIX"]}">🤖</tg-emoji>'
+        # সার্ভিস ডিটেক্ট
+        detected = detect_service_from_message(message)
+        if detected == "UNKNOWN" and service and service != "UNKNOWN":
+            detected = service
+        service_name = detected.strip().title() if detected else "UNKNOWN"
 
-        # ---- Country ----
+        # কান্ট্রি ইনফো
         country_info = get_country_info(number)
         if country_info:
             iso = country_info["iso"]
             flag = country_info["flag"]
             name = country_info["name"]
-            emoji_id = get_country_emoji(name)
-            if emoji_id:
-                country_display = f'<tg-emoji emoji-id="{emoji_id}">{flag}</tg-emoji><b>{iso}</b>'
+
+            # কান্ট্রি ইমোজি
+            country_emoji_id = get_country_emoji(name)
+            if country_emoji_id:
+                country_display = f'<tg-emoji emoji-id="{country_emoji_id}">{flag}</tg-emoji><b>{iso}</b>'
             else:
                 country_display = f'{flag}<b>{iso}</b>'
+
+            # সার্ভিস ইমোজি
+            service_emoji_id = get_service_emoji(name, detected)
         else:
             country_display = "<b>??</b>"
+            service_emoji_id = None
+            name = "UNKNOWN"
 
-        # ---- Service ----
-        service_clean = service.strip().title() if service else "UNKNOWN"
-        emoji_id = get_service_emoji(service_clean)
-        if emoji_id:
-            service_display = f'<tg-emoji emoji-id="{emoji_id}">🔧</tg-emoji>'
+        if service_emoji_id:
+            service_display = f'<tg-emoji emoji-id="{service_emoji_id}">🔧</tg-emoji>'
         else:
-            service_display = f'#{service_clean}'
+            service_display = f'#{service_name}'
 
-        # ---- Masked Number ----
-        clean_num = number.replace("+", "")
-        if len(clean_num) >= 9:
-            prefix_num = clean_num[:5]
-            suffix_num = clean_num[-4:]
-        else:
-            prefix_num = clean_num[:5] if len(clean_num)>=5 else clean_num
-            suffix_num = clean_num[-4:] if len(clean_num)>=4 else ""
-        masked = f'<b>+{prefix_num}<tg-emoji emoji-id="{EMOJI["SEPARATOR"]}">➖</tg-emoji>{suffix_num}</b>'
+        # মাস্কড নাম্বার
+        clean = number.replace("+","")
+        pfx = clean[:5] if len(clean)>=5 else clean[:len(clean)-4]
+        sfx = clean[-4:] if len(clean)>=4 else clean
+        masked = f'<b>+{pfx}<tg-emoji emoji-id="{EMOJI["SEPARATOR"]}">➖</tg-emoji>{sfx}</b>'
 
-        # ---- Full Text ----
-        text = f"{prefix_emoji}{country_display} | {service_display} {masked}"
+        # প্রিফিক্স
+        prefix = f'<tg-emoji emoji-id="{EMOJI["PREFIX"]}">🤖</tg-emoji>'
 
-        # ---- Buttons ----
+        text = f"{prefix}{country_display} | {service_display} {masked}"
+
+        # ────────── বাটন (স্টাইল + কাস্টম ইমোজি) ──────────
+        # style: 2 = success (সবুজ), 1 = primary (নীল)
         otp_btn = InlineKeyboardButton(
-            text="𝐎𝐓𝐏 📋",
-            copy_text=CopyTextButton(text=otp)
+            text="𝐎𝐓𝐏",
+            copy_text=CopyTextButton(text=otp),
+            style=2,                                 # success green
+            icon_custom_emoji_id=EMOJI["OTP_BUTTON"]
         )
         channel_btn = InlineKeyboardButton(
-            text="𝐂𝐇𝐀𝐍𝐍𝐄𝐋 📢",
-            url=CHANNEL_URL
+            text="𝐂𝐇𝐀𝐍𝐍𝐄𝐋",
+            url=CHANNEL_URL,
+            style=1,                                 # primary blue
+            icon_custom_emoji_id=EMOJI["CHANNEL_BUTTON"]
         )
         bot_btn = InlineKeyboardButton(
-            text="𝐁𝐎𝐓 🤖",
-            url=BOT_URL
+            text="𝐁𝐎𝐓",
+            url=BOT_URL,
+            style=1,
+            icon_custom_emoji_id=EMOJI["BOT_BUTTON"]
         )
         keyboard = InlineKeyboardMarkup([[otp_btn], [channel_btn, bot_btn]])
 
@@ -314,86 +272,56 @@ def send_otp_to_group(service, number, message, dt):
             parse_mode="HTML",
             disable_web_page_preview=True
         )
-        print(f"✅ Sent: {service_clean} - {number}")
-        # ১১ মিনিট পর ডিলিট
-        threading.Thread(target=delete_after_delay, args=(sent.message_id, 650)).start()
+        print(f"✅ Sent {service_name} ({name})")
+        threading.Thread(target=lambda: time.sleep(650) or bot.delete_message(GROUP_ID, sent.message_id)).start()
     except Exception as e:
         print(f"❌ Send error: {e}")
 
-def delete_after_delay(msg_id, delay):
-    time.sleep(delay)
-    try:
-        bot.delete_message(GROUP_ID, msg_id)
-    except: pass
-
-# ============= স্ক্র্যাপার (নতুন ডিডুপ লজিক) =============
+# ============= স্ক্র্যাপার =============
 def otp_scraper():
-    global seen_dict
-    print("🟢 Scraper Started")
     page = 1
-
     while True:
         try:
             today = datetime.now().strftime('%Y-%m-%d')
             params = {"token": API_TOKEN, "from": today, "to": today, "limit": 100, "page": page}
-            print(f"📡 Page {page}")
             r = requests.get(API_URL, params=params, timeout=10)
             r.raise_for_status()
             records = parse_agent_sms_response(r.json())
-
             if not records:
-                if page == 1:
-                    print("📭 No records today")
-                else:
-                    page = 1
+                page = 1 if page>1 else 1
                 time.sleep(10)
                 continue
-
-            current_time = time.time()
-            new_count = 0
-
+            now = time.time()
+            new = 0
             for rec in records:
-                if not rec['number'] or not rec['message']:
-                    continue
+                if not rec['number'] or not rec['message']: continue
                 otp = extract_otp(rec['message'])
-                if not otp:
-                    continue
-
+                if not otp: continue
                 uid = f"{rec['datetime']}_{rec['number']}_{otp}"
-
                 with seen_lock:
-                    # প্রথম রানে seen_dict ফাঁকা → সব পাঠাবে
-                    # পরবর্তীতে ২৪ ঘন্টার ডিডুপ চেক
                     if uid in seen_dict:
-                        # ২৪ ঘন্টা পার হলে আবার পাঠাবে
-                        if current_time - seen_dict[uid] > 24 * 3600:
-                            seen_dict[uid] = current_time
-                            new_count += 1
-                            send_otp_to_group(rec['service'], rec['number'], rec['message'], rec['datetime'])
-                        else:
-                            continue
+                        if now - seen_dict[uid] > 86400:
+                            seen_dict[uid] = now
+                            new += 1
+                            send_otp_to_group(rec['sender'], rec['number'], rec['message'], rec['datetime'])
                     else:
-                        seen_dict[uid] = current_time
-                        new_count += 1
-                        send_otp_to_group(rec['service'], rec['number'], rec['message'], rec['datetime'])
-
-                # প্রতি ৫০ আইটেমে ফাইল সেভ
+                        seen_dict[uid] = now
+                        new += 1
+                        send_otp_to_group(rec['sender'], rec['number'], rec['message'], rec['datetime'])
                 if len(seen_dict) % 50 == 0:
-                    save_seen_otps(seen_dict)
-
-            if new_count:
-                save_seen_otps(seen_dict)
-                print(f"🎯 {new_count} new OTPs sent/re-sent")
-
+                    with open(SEEN_FILE,'w') as f: json.dump(seen_dict, f)
+            if new:
+                with open(SEEN_FILE,'w') as f: json.dump(seen_dict, f)
+                print(f"🎯 {new} new")
             page += 1
-            if page > 50:
-                page = 1
-
+            if page > 50: page = 1
         except Exception as e:
             print(f"Scraper error: {e}")
             time.sleep(5)
 
 # ============= অ্যাডমিন কমান্ড =============
+pending_requests = {}
+
 def admin_only(func):
     def wrapper(message):
         if message.from_user.id not in ADMIN_IDS:
@@ -404,62 +332,84 @@ def admin_only(func):
 @bot.message_handler(commands=["start"])
 @admin_only
 def start_cmd(message):
-    bot.reply_to(message, "🤖 Bot Active")
+    bot.reply_to(message, "🤖 বট রানিং")
 
 @bot.message_handler(commands=["stats"])
 @admin_only
 def stats_cmd(message):
-    with seen_lock:
-        count = len(seen_dict)
-    bot.reply_to(message, f"📊 {count} OTPs tracked")
+    bot.reply_to(message, f"📊 {len(seen_dict)} OTPs tracked")
 
 @bot.message_handler(commands=["ping"])
 @admin_only
 def ping_cmd(message):
-    bot.reply_to(message, "🏓 Pong!")
+    bot.reply_to(message, "🏓 Pong")
 
-@bot.message_handler(commands=["setcountry"])
+@bot.message_handler(commands=["set"])
 @admin_only
-def set_country(message):
+def set_cmd(message):
     try:
-        parts = message.text.split(" ", 1)[1].split("|")
-        if len(parts) != 2:
-            bot.reply_to(message, "Format: /setcountry COUNTRY|EMOJI_ID")
+        parts = message.text.split()
+        if len(parts) < 3:
+            bot.reply_to(message, "❌ ফরম্যাট: /set COUNTRY SERVICE")
             return
-        country = parts[0].strip().lower()
-        emoji_id = parts[1].strip()
-        emoji_data["countries"][country] = emoji_id
-        save_emoji_data(emoji_data)
-        bot.reply_to(message, f"✅ Country emoji set for {country.upper()}")
+        country = parts[1].upper()
+        service = parts[2].capitalize()
+        existing = get_service_emoji(country, service)
+        if existing:
+            bot.reply_to(message, f"✅ {country} এর {service} এর ইমোজি আগেই সেট করা আছে।", parse_mode="HTML")
+            return
+        pending_requests[message.from_user.id] = {"country": country, "service": service}
+        flag = next((f for c,(iso,f,n) in COUNTRY_CODE_MAP.items() if n.upper()==country), "🏳")
+        bot.reply_to(message,
+            f"{flag} <b>{country}</b> - <b>{service}</b> এর ইমোজি সেট নেই।\n\n"
+            f"ইমোজি আইডি পাঠান:\n<code>{country}|{service}|EMOJI_ID</code>",
+            parse_mode="HTML")
     except Exception as e:
         bot.reply_to(message, f"Error: {e}")
 
-@bot.message_handler(commands=["setservice"])
+@bot.message_handler(commands=["list"])
 @admin_only
-def set_service(message):
+def list_cmd(message):
+    if not emoji_data.get("countries"):
+        bot.reply_to(message, "📭 এখনও কিছু সেট করা হয়নি")
+        return
+    txt = "📋 <b>ইমোজি লিস্ট:</b>\n"
+    for ctry, data in emoji_data["countries"].items():
+        flag = next((f for c,(iso,f,n) in COUNTRY_CODE_MAP.items() if n.lower()==ctry), "🏳")
+        txt += f"\n{flag} <b>{ctry.upper()}</b>"
+        if "emoji_id" in data:
+            txt += f"\n  🏴 কান্ট্রি: <code>{data['emoji_id']}</code>"
+        for svc, eid in data.get("services", {}).items():
+            txt += f"\n  📱 {svc.capitalize()}: <code>{eid}</code>"
+    bot.reply_to(message, txt, parse_mode="HTML")
+
+@bot.message_handler(func=lambda m: m.from_user.id in ADMIN_IDS and m.from_user.id in pending_requests)
+def receive_emoji_id(message):
     try:
-        parts = message.text.split(" ", 1)[1].split("|")
-        if len(parts) != 2:
-            bot.reply_to(message, "Format: /setservice SERVICE|EMOJI_ID")
+        parts = message.text.strip().split("|")
+        if len(parts) != 3 or not parts[2].isdigit():
+            bot.reply_to(message, "❌ ফরম্যাট: COUNTRY|SERVICE|EMOJI_ID")
             return
-        service = parts[0].strip().lower()
-        emoji_id = parts[1].strip()
-        emoji_data["services"][service] = emoji_id
+        country, service, eid = parts[0].strip().upper(), parts[1].strip().capitalize(), parts[2].strip()
+        country_lower = country.lower()
+        service_lower = service.lower()
+        emoji_data.setdefault("countries", {}).setdefault(country_lower, {})
+        emoji_data["countries"][country_lower].setdefault("services", {})[service_lower] = eid
         save_emoji_data(emoji_data)
-        bot.reply_to(message, f"✅ Service emoji set for {service.capitalize()}")
+        del pending_requests[message.from_user.id]
+        flag = next((f for c,(iso,f,n) in COUNTRY_CODE_MAP.items() if n.upper()==country), "🏳")
+        bot.reply_to(message,
+            f"✅ {flag} <b>{country}</b> - <b>{service}</b>\n"
+            f"🆔 ইমোজি আইডি: <code>{eid}</code>\nপরবর্তী OTP তে এই ইমোজি দেখাবে।",
+            parse_mode="HTML")
     except Exception as e:
         bot.reply_to(message, f"Error: {e}")
+        if message.from_user.id in pending_requests: del pending_requests[message.from_user.id]
 
 # ============= মেইন =============
 if __name__ == "__main__":
-    print("="*50)
-    print("🚀 Bot Starting...")
-
-    # প্রথম রানে সব OTP পাঠানোর জন্য sent_otps ফাইল রিসেট
-    reset_seen_for_first_run()
-    print("📭 History cleared → will send all OTPs on first run.")
-
+    print("🚀 Starting with custom emoji buttons...")
+    reset_seen()
     threading.Thread(target=lambda: app.run(host="0.0.0.0", port=8080, debug=False, use_reloader=False), daemon=True).start()
     threading.Thread(target=otp_scraper, daemon=True).start()
-    print("🤖 Bot is now polling...")
     bot.infinity_polling(timeout=10, long_polling_timeout=5)
