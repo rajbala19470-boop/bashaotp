@@ -1,7 +1,6 @@
 import time
 import requests
 import threading
-import html
 import re
 import json
 import os
@@ -10,21 +9,21 @@ from telebot import TeleBot, types
 from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup, CopyTextButton
 from flask import Flask
 
-# ================= CONFIG ==================
+# ================= কনফিগ (আপনার তথ্য) =================
 BOT_TOKEN = "8208003630:AAE9PGWAetvkB2SDcOigYS5Yjfo7UzqUvN4"
 GROUP_ID = "-1004380384761"
 API_TOKEN = "6e4b2ca76e753ac9024d3c71ca59d4e6"
 API_URL = "http://headshotsms.kdns.fr/ints/login/api/agent_sms.php"
 CHANNEL_URL = "https://t.me/RHTotp"
 BOT_URL = "http://t.me/RhtNumberRobot"
-ADMIN_IDS = [8744359777]  # আপনার টেলিগ্রাম ইউজার আইডি দিন
+ADMIN_IDS = [8744359777]
 
 SEEN_FILE = "sent_otps.json"
-EMOJI_DATA_FILE = "emoji_data.json"  # কাস্টম ইমোজি ডাটা
+EMOJI_DATA_FILE = "emoji_data.json"
 
 bot = TeleBot(BOT_TOKEN, parse_mode="HTML")
 
-# ================= ইমোজি ID (স্থায়ী) =================
+# ================= ইমোজি আইডি =================
 EMOJI = {
     "SEPARATOR": "6307542847251814164",
     "OTP_BUTTON": "6206420230269310869",
@@ -34,7 +33,6 @@ EMOJI = {
     "PREFIX": "4958725487682650920"
 }
 
-# ================= ডিফল্ট ইমোজি ম্যাপিং =================
 DEFAULT_EMOJIS = {
     "services": {
         "uber": "5298715455316303708",
@@ -52,7 +50,7 @@ app = Flask(__name__)
 def home():
     return "OTP Bot Running"
 
-# ============= ইমোজি ডাটা লোড/সেভ ==============
+# ============= ইমোজি ডাটা ম্যানেজমেন্ট ==============
 def load_emoji_data():
     if os.path.exists(EMOJI_DATA_FILE):
         with open(EMOJI_DATA_FILE, 'r') as f:
@@ -66,18 +64,14 @@ def save_emoji_data(data):
 emoji_data = load_emoji_data()
 
 def get_country_emoji(country_name_upper):
-    """দেশের জন্য ইমোজি ID রিটার্ন (প্রায়োরিটি: emoji_data > DEFAULT_EMOJIS)"""
     name_lower = country_name_upper.lower()
-    # 1. কাস্টম ডাটা থেকে
     if name_lower in emoji_data["countries"]:
         return emoji_data["countries"][name_lower]
-    # 2. ডিফল্ট থেকে
     if name_lower in DEFAULT_EMOJIS["countries"]:
         return DEFAULT_EMOJIS["countries"][name_lower]
     return None
 
 def get_service_emoji(service_name_capitalized):
-    """সার্ভিসের জন্য ইমোজি ID (প্রায়োরিটি: emoji_data > DEFAULT_EMOJIS)"""
     name_lower = service_name_capitalized.lower()
     if name_lower in emoji_data["services"]:
         return emoji_data["services"][name_lower]
@@ -85,35 +79,27 @@ def get_service_emoji(service_name_capitalized):
         return DEFAULT_EMOJIS["services"][name_lower]
     return None
 
-# ============= সীন OTP ম্যানেজমেন্ট ==============
+# ============= OTP স্টোরেজ (নতুন লজিক সহ) ==============
+seen_dict = {}   # গ্লোবাল, শুরুতে ফাঁকা থাকবে
+seen_lock = threading.Lock()
+
 def load_seen_otps():
-    try:
-        if os.path.exists(SEEN_FILE):
-            with open(SEEN_FILE, 'r') as f:
-                return json.load(f)
-    except: pass
+    if os.path.exists(SEEN_FILE):
+        with open(SEEN_FILE, 'r') as f:
+            return json.load(f)
     return {}
 
 def save_seen_otps(data):
     with open(SEEN_FILE, 'w') as f:
         json.dump(data, f)
 
-seen_dict = load_seen_otps()
-seen_lock = threading.Lock()
+# প্রথম রানে সব OTP পাঠানোর জন্য ফাইল রিসেট
+def reset_seen_for_first_run():
+    global seen_dict
+    seen_dict = {}
+    save_seen_otps({})   # ফাইলও ফাঁকা করে দিই
 
-def cleanup_old_otps():
-    while True:
-        time.sleep(3600)
-        seen_dict = load_seen_otps()
-        now = time.time()
-        cutoff = now - 24*3600
-        old = len(seen_dict)
-        seen_dict = {k:v for k,v in seen_dict.items() if v > cutoff}
-        if len(seen_dict) < old:
-            save_seen_otps(seen_dict)
-            print(f"🧹 Cleaned {old - len(seen_dict)} old OTPs")
-
-# ============= কান্ট্রি ডিটেকশন ও আইএসও ম্যাপিং ==============
+# ============= কান্ট্রি ম্যাপিং =============
 COUNTRY_CODE_MAP = {
     "263": ("ZW", "🇿🇼", "ZIMBABWE"), "1": ("US", "🇺🇸", "USA"),
     "52": ("MX", "🇲🇽", "MEXICO"), "58": ("VE", "🇻🇪", "VENEZUELA"),
@@ -162,16 +148,81 @@ def get_country_info(number):
             return {"iso": iso, "flag": flag, "name": name}
     return None
 
-# ============= OTP এক্সট্রাক্টর (আগের মতো) =============
+# ============= শক্তিশালী OTP এক্সট্র্যাক্টর =============
 def extract_otp(text):
-    if not text: return None
+    if not text:
+        return None
     text = ' '.join(text.split())
-    # ... (আগের সম্পূর্ণ extract_otp ফাংশন বসান) ...
-    # এখানে সংক্ষেপে দিচ্ছি, আপনি আগের বড় ফাংশনটি বসিয়ে দেবেন।
-    match = re.search(r'(\d{3})[-—\s](\d{3})', text)
-    if match: return match.group(1)+match.group(2)
-    # ... বাকি প্যাটার্ন ...
-    matches = re.findall(r'\b(\d{4,8})\b', text)
+
+    # হাইফেনযুক্ত প্যাটার্ন
+    for pat, lens in [(r'(\d{3})[-—\s](\d{3})',6), (r'(\d{2})[-—\s](\d{3})',5),
+                      (r'(\d{3})[-—\s](\d{2})',5), (r'(\d{3})[-—\s](\d{2})[-—\s](\d{2})',7),
+                      (r'(\d{4})[-—\s](\d{4})',8)]:
+        match = re.search(pat, text)
+        if match:
+            otp = ''.join(match.groups())
+            if otp.isdigit() and len(otp)==lens:
+                return otp
+
+    # কীওয়ার্ড + সংখ্যা
+    keywords = [
+        'code','is','otp','pin','verification','verification code',
+        'security code','activation code','one time password','password',
+        'code est','est','votre code','le code','código','tu código','el código',
+        'code ist','ist','ihr code','codice','il codice','código é','é',
+        'كود','رمز','كلمة المرور','كود التفعيل','کوڈ','पिन','код','пароль',
+        'kod','şifre','kode','adalah','验证码','认证码','驗證碼','コード','認証コード','인증번호','코드'
+    ]
+    for kw in keywords:
+        pattern = r'{}\s*:?\s*[#]?\s*(\d{{4,8}})'.format(re.escape(kw))
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            otp = match.group(1)
+            if 4 <= len(otp) <= 8: return otp
+        pattern = r'{}\s*:?\s*(\d{{1,4}})[-—\s](\d{{1,4}})[-—\s]?(\d{{0,4}})?'.format(re.escape(kw))
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            groups = [g for g in match.groups() if g]
+            otp = ''.join(groups)
+            if 4 <= len(otp) <= 8: return otp
+
+    # common phrases
+    phrases = [r'is\s+(\d{4,8})', r'are\s+(\d{4,8})', r':\s*(\d{4,8})', r'#\s*(\d{4,8})',
+               r'№\s*(\d{4,8})', r'code:\s*(\d{4,8})', r'code\s+(\d{4,8})',
+               r'pin:\s*(\d{4,8})', r'pin\s+(\d{4,8})', r'otp:\s*(\d{4,8})', r'otp\s+(\d{4,8})']
+    for phrase in phrases:
+        match = re.search(phrase, text, re.IGNORECASE)
+        if match and 4 <= len(match.group(1)) <= 8:
+            return match.group(1)
+
+    # standalone numbers
+    for length in [6,5,4,7,8]:
+        matches = re.findall(r'\b(\d{' + str(length) + r'})\b', text)
+        if matches: return matches[0]
+
+    # end of line
+    lines = text.split('\n')
+    for line in reversed(lines):
+        match = re.search(r'(\d{4,8})\s*$', line)
+        if match: return match.group(1)
+
+    # brackets
+    match = re.search(r'[\(\[]\s*(\d{4,8})\s*[\)\]]', text)
+    if match: return match.group(1)
+
+    # after symbol
+    match = re.search(r'[>:\-]\s*(\d{4,8})', text)
+    if match: return match.group(1)
+
+    # spaced digits
+    match = re.search(r'(\d)\s+(\d)\s+(\d)\s+(\d)\s+(\d)\s*(\d)?\s*(\d)?\s*(\d)?', text)
+    if match:
+        groups = [g for g in match.groups() if g]
+        otp = ''.join(groups)
+        if 4 <= len(otp) <= 8: return otp
+
+    # last resort
+    matches = re.findall(r'(\d{4,8})', text)
     if matches: return max(matches, key=len)
     return None
 
@@ -197,7 +248,7 @@ def parse_agent_sms_response(response_data):
                     })
     return records
 
-# ============= ফরম্যাটিং ও মেসেজ সেন্ড =============
+# ============= মেসেজ ফরম্যাটিং ও সেন্ড =============
 def send_otp_to_group(service, number, message, dt):
     try:
         otp = extract_otp(message)
@@ -219,9 +270,7 @@ def send_otp_to_group(service, number, message, dt):
             else:
                 country_display = f'{flag}<b>{iso}</b>'
         else:
-            # অজানা কান্ট্রি
-            # যদি কোনো নাম পাওয়া না যায় (একেবারেই মেলেনি)
-            country_display = "<b>??</b>"  # ফলব্যাক
+            country_display = "<b>??</b>"
 
         # ---- Service ----
         service_clean = service.strip().title() if service else "UNKNOWN"
@@ -265,7 +314,8 @@ def send_otp_to_group(service, number, message, dt):
             parse_mode="HTML",
             disable_web_page_preview=True
         )
-        print(f"✅ OTP sent: {service_clean} - {number}")
+        print(f"✅ Sent: {service_clean} - {number}")
+        # ১১ মিনিট পর ডিলিট
         threading.Thread(target=delete_after_delay, args=(sent.message_id, 650)).start()
     except Exception as e:
         print(f"❌ Send error: {e}")
@@ -276,11 +326,77 @@ def delete_after_delay(msg_id, delay):
         bot.delete_message(GROUP_ID, msg_id)
     except: pass
 
-# ============= অ্যাডমিন কমান্ড (শুধু ADMIN_IDS) =============
+# ============= স্ক্র্যাপার (নতুন ডিডুপ লজিক) =============
+def otp_scraper():
+    global seen_dict
+    print("🟢 Scraper Started")
+    page = 1
+
+    while True:
+        try:
+            today = datetime.now().strftime('%Y-%m-%d')
+            params = {"token": API_TOKEN, "from": today, "to": today, "limit": 100, "page": page}
+            print(f"📡 Page {page}")
+            r = requests.get(API_URL, params=params, timeout=10)
+            r.raise_for_status()
+            records = parse_agent_sms_response(r.json())
+
+            if not records:
+                if page == 1:
+                    print("📭 No records today")
+                else:
+                    page = 1
+                time.sleep(10)
+                continue
+
+            current_time = time.time()
+            new_count = 0
+
+            for rec in records:
+                if not rec['number'] or not rec['message']:
+                    continue
+                otp = extract_otp(rec['message'])
+                if not otp:
+                    continue
+
+                uid = f"{rec['datetime']}_{rec['number']}_{otp}"
+
+                with seen_lock:
+                    # প্রথম রানে seen_dict ফাঁকা → সব পাঠাবে
+                    # পরবর্তীতে ২৪ ঘন্টার ডিডুপ চেক
+                    if uid in seen_dict:
+                        # ২৪ ঘন্টা পার হলে আবার পাঠাবে
+                        if current_time - seen_dict[uid] > 24 * 3600:
+                            seen_dict[uid] = current_time
+                            new_count += 1
+                            send_otp_to_group(rec['service'], rec['number'], rec['message'], rec['datetime'])
+                        else:
+                            continue
+                    else:
+                        seen_dict[uid] = current_time
+                        new_count += 1
+                        send_otp_to_group(rec['service'], rec['number'], rec['message'], rec['datetime'])
+
+                # প্রতি ৫০ আইটেমে ফাইল সেভ
+                if len(seen_dict) % 50 == 0:
+                    save_seen_otps(seen_dict)
+
+            if new_count:
+                save_seen_otps(seen_dict)
+                print(f"🎯 {new_count} new OTPs sent/re-sent")
+
+            page += 1
+            if page > 50:
+                page = 1
+
+        except Exception as e:
+            print(f"Scraper error: {e}")
+            time.sleep(5)
+
+# ============= অ্যাডমিন কমান্ড =============
 def admin_only(func):
     def wrapper(message):
         if message.from_user.id not in ADMIN_IDS:
-            bot.reply_to(message, "⛔ Admin only command.")
             return
         return func(message)
     return wrapper
@@ -306,16 +422,15 @@ def ping_cmd(message):
 @admin_only
 def set_country(message):
     try:
-        # ফরম্যাট: /setcountry KENYA|5294051631933967760
         parts = message.text.split(" ", 1)[1].split("|")
         if len(parts) != 2:
-            bot.reply_to(message, "Format: /setcountry COUNTRY|EMOJI_ID\nExample: /setcountry BANGLADESH|6204108584381322968")
+            bot.reply_to(message, "Format: /setcountry COUNTRY|EMOJI_ID")
             return
         country = parts[0].strip().lower()
         emoji_id = parts[1].strip()
         emoji_data["countries"][country] = emoji_id
         save_emoji_data(emoji_data)
-        bot.reply_to(message, f'<tg-emoji emoji-id="{emoji_id}">✅</tg-emoji> Country emoji set for {country.upper()}', parse_mode="HTML")
+        bot.reply_to(message, f"✅ Country emoji set for {country.upper()}")
     except Exception as e:
         bot.reply_to(message, f"Error: {e}")
 
@@ -325,63 +440,26 @@ def set_service(message):
     try:
         parts = message.text.split(" ", 1)[1].split("|")
         if len(parts) != 2:
-            bot.reply_to(message, "Format: /setservice SERVICE|EMOJI_ID\nExample: /setservice WhatsApp|5294000123456789012")
+            bot.reply_to(message, "Format: /setservice SERVICE|EMOJI_ID")
             return
         service = parts[0].strip().lower()
         emoji_id = parts[1].strip()
         emoji_data["services"][service] = emoji_id
         save_emoji_data(emoji_data)
-        bot.reply_to(message, f'<tg-emoji emoji-id="{emoji_id}">✅</tg-emoji> Service emoji set for {service.capitalize()}', parse_mode="HTML")
+        bot.reply_to(message, f"✅ Service emoji set for {service.capitalize()}")
     except Exception as e:
         bot.reply_to(message, f"Error: {e}")
-
-# ============= স্ক্র্যাপার থ্রেড =============
-def otp_scraper():
-    print("🟢 Scraper Started")
-    page = 1
-    while True:
-        try:
-            today = datetime.now().strftime('%Y-%m-%d')
-            params = {"token": API_TOKEN, "from": today, "to": today, "limit": 100, "page": page}
-            print(f"📡 Page {page}")
-            r = requests.get(API_URL, params=params, timeout=10)
-            r.raise_for_status()
-            records = parse_agent_sms_response(r.json())
-            if not records:
-                if page == 1:
-                    print("📭 No records today")
-                else:
-                    page = 1
-                time.sleep(10)
-                continue
-            current_time = time.time()
-            new = 0
-            for rec in records:
-                if not rec['number'] or not rec['message']: continue
-                otp = extract_otp(rec['message'])
-                if not otp: continue
-                uid = f"{rec['datetime']}_{rec['number']}_{otp}"
-                with seen_lock:
-                    if uid in seen_dict: continue
-                    seen_dict[uid] = current_time
-                    new += 1
-                    if len(seen_dict) % 50 == 0: save_seen_otps(seen_dict)
-                send_otp_to_group(rec['service'], rec['number'], rec['message'], rec['datetime'])
-            if new:
-                save_seen_otps(seen_dict)
-                print(f"🎯 {new} new OTPs")
-            page += 1
-            if page > 50: page = 1
-        except Exception as e:
-            print(f"Scraper error: {e}")
-            time.sleep(5)
 
 # ============= মেইন =============
 if __name__ == "__main__":
     print("="*50)
-    print("🚀 Starting Bot with new format")
-    threading.Thread(target=cleanup_old_otps, daemon=True).start()
+    print("🚀 Bot Starting...")
+
+    # প্রথম রানে সব OTP পাঠানোর জন্য sent_otps ফাইল রিসেট
+    reset_seen_for_first_run()
+    print("📭 History cleared → will send all OTPs on first run.")
+
     threading.Thread(target=lambda: app.run(host="0.0.0.0", port=8080, debug=False, use_reloader=False), daemon=True).start()
     threading.Thread(target=otp_scraper, daemon=True).start()
-    print("✅ Bot running...")
+    print("🤖 Bot is now polling...")
     bot.infinity_polling(timeout=10, long_polling_timeout=5)
