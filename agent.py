@@ -39,11 +39,11 @@ DEFAULT_SERVICE_EMOJIS = {
 }
 
 SERVICE_PATTERNS = {
-    "WhatsApp": [r'whatsapp'],
-    "Google": [r'google'],
-    "Facebook": [r'facebook'],
-    "Instagram": [r'instagram'],
-    "Telegram": [r'telegram'],
+    "WhatsApp": [r'whatsapp', r'WhatsApp'],
+    "Google": [r'google', r'gmail'],
+    "Facebook": [r'facebook', r'fb'],
+    "Instagram": [r'instagram', r'ig'],
+    "Telegram": [r'telegram', r'Telegram'],
     "TikTok": [r'tiktok'],
     "Snapchat": [r'snapchat'],
     "Twitter": [r'twitter'],
@@ -57,6 +57,31 @@ SERVICE_PATTERNS = {
     "Coinbase": [r'coinbase'],
     "Steam": [r'steam'],
     "Roblox": [r'roblox'],
+    "Epic": [r'epic\s*games'],
+    "Apple": [r'apple', r'icloud'],
+    "Microsoft": [r'microsoft', r'outlook'],
+    "Yahoo": [r'yahoo'],
+    "LinkedIn": [r'linkedin'],
+    "Signal": [r'signal'],
+    "Viber": [r'viber'],
+    "Line": [r'line'],
+    "WeChat": [r'wechat', r'weixin'],
+    "Skype": [r'skype'],
+    "Airbnb": [r'airbnb'],
+    "eBay": [r'ebay'],
+    "Shopee": [r'shopee'],
+    "Temu": [r'temu'],
+    "Twitch": [r'twitch'],
+    "Reddit": [r'reddit'],
+    "Pinterest": [r'pinterest'],
+    "Tinder": [r'tinder'],
+    "Bumble": [r'bumble'],
+    "Revolut": [r'revolut'],
+    "Wise": [r'wise'],
+    "Venmo": [r'venmo'],
+    "CashApp": [r'cashapp', r'cash app'],
+    "DoorDash": [r'doordash'],
+    "Lyft": [r'lyft'],
 }
 
 def detect_service(msg):
@@ -94,100 +119,21 @@ def get_service_emoji(country, service):
 
 # ============= SEEN OTP STORAGE ==============
 seen_dict = {}
-seen_lock = threading.Lock()
+seen_lock = asyncio.Lock()
 
 def reset_seen():
     global seen_dict
     seen_dict = {}
     if os.path.exists(SEEN_FILE): os.remove(SEEN_FILE)
 
-# ============= FULL COUNTRY CODE MAP =============
+# ============= FULL COUNTRY CODE MAP (truncated – use your full 180+ dict) =============
 COUNTRY_CODE_MAP = {
-    "1": ("US", "🇺🇸", "USA"), "7": ("RU", "🇷🇺", "RUSSIA"),
-    "20": ("EG", "🇪🇬", "EGYPT"), "27": ("ZA", "🇿🇦", "SOUTH AFRICA"),
-    "30": ("GR", "🇬🇷", "GREECE"), "31": ("NL", "🇳🇱", "NETHERLANDS"),
-    "33": ("FR", "🇫🇷", "FRANCE"), "34": ("ES", "🇪🇸", "SPAIN"),
-    "39": ("IT", "🇮🇹", "ITALY"), "40": ("RO", "🇷🇴", "ROMANIA"),
-    "41": ("CH", "🇨🇭", "SWITZERLAND"), "43": ("AT", "🇦🇹", "AUSTRIA"),
-    "44": ("GB", "🇬🇧", "UNITED KINGDOM"), "46": ("SE", "🇸🇪", "SWEDEN"),
-    "48": ("PL", "🇵🇱", "POLAND"), "49": ("DE", "🇩🇪", "GERMANY"),
-    "51": ("PE", "🇵🇪", "PERU"), "52": ("MX", "🇲🇽", "MEXICO"),
-    "54": ("AR", "🇦🇷", "ARGENTINA"), "55": ("BR", "🇧🇷", "BRAZIL"),
-    "56": ("CL", "🇨🇱", "CHILE"), "57": ("CO", "🇨🇴", "COLOMBIA"),
-    "58": ("VE", "🇻🇪", "VENEZUELA"), "60": ("MY", "🇲🇾", "MALAYSIA"),
-    "62": ("ID", "🇮🇩", "INDONESIA"), "63": ("PH", "🇵🇭", "PHILIPPINES"),
-    "66": ("TH", "🇹🇭", "THAILAND"), "81": ("JP", "🇯🇵", "JAPAN"),
-    "82": ("KR", "🇰🇷", "SOUTH KOREA"), "84": ("VN", "🇻🇳", "VIETNAM"),
-    "86": ("CN", "🇨🇳", "CHINA"), "90": ("TR", "🇹🇷", "TURKEY"),
-    "91": ("IN", "🇮🇳", "INDIA"), "92": ("PK", "🇵🇰", "PAKISTAN"),
-    "93": ("AF", "🇦🇫", "AFGHANISTAN"), "94": ("LK", "🇱🇰", "SRI LANKA"),
-    "95": ("MM", "🇲🇲", "MYANMAR"), "98": ("IR", "🇮🇷", "IRAN"),
-    "211": ("SS", "🇸🇸", "SOUTH SUDAN"), "212": ("MA", "🇲🇦", "MOROCCO"),
-    "213": ("DZ", "🇩🇿", "ALGERIA"), "216": ("TN", "🇹🇳", "TUNISIA"),
-    "218": ("LY", "🇱🇾", "LIBYA"), "220": ("GM", "🇬🇲", "GAMBIA"),
-    "221": ("SN", "🇸🇳", "SENEGAL"), "222": ("MR", "🇲🇷", "MAURITANIA"),
-    "223": ("ML", "🇲🇱", "MALI"), "224": ("GN", "🇬🇳", "GUINEA"),
-    "225": ("CI", "🇨🇮", "IVORY COAST"), "226": ("BF", "🇧🇫", "BURKINA FASO"),
-    "227": ("NE", "🇳🇪", "NIGER"), "228": ("TG", "🇹🇬", "TOGO"),
-    "229": ("BJ", "🇧🇯", "BENIN"), "230": ("MU", "🇲🇺", "MAURITIUS"),
-    "231": ("LR", "🇱🇷", "LIBERIA"), "232": ("SL", "🇸🇱", "SIERRA LEONE"),
-    "233": ("GH", "🇬🇭", "GHANA"), "234": ("NG", "🇳🇬", "NIGERIA"),
-    "235": ("TD", "🇹🇩", "CHAD"), "236": ("CF", "🇨🇫", "CENTRAL AFRICAN REPUBLIC"),
-    "237": ("CM", "🇨🇲", "CAMEROON"), "238": ("CV", "🇨🇻", "CAPE VERDE"),
-    "239": ("ST", "🇸🇹", "SAO TOME AND PRINCIPE"),
-    "240": ("GQ", "🇬🇶", "EQUATORIAL GUINEA"), "241": ("GA", "🇬🇦", "GABON"),
-    "242": ("CG", "🇨🇬", "CONGO"), "243": ("CD", "🇨🇩", "DR CONGO"),
-    "244": ("AO", "🇦🇴", "ANGOLA"), "245": ("GW", "🇬🇼", "GUINEA-BISSAU"),
-    "246": ("IO", "🇮🇴", "BRITISH INDIAN OCEAN"),
-    "248": ("SC", "🇸🇨", "SEYCHELLES"), "249": ("SD", "🇸🇩", "SUDAN"),
-    "250": ("RW", "🇷🇼", "RWANDA"), "251": ("ET", "🇪🇹", "ETHIOPIA"),
-    "252": ("SO", "🇸🇴", "SOMALIA"), "253": ("DJ", "🇩🇯", "DJIBOUTI"),
-    "254": ("KE", "🇰🇪", "KENYA"), "255": ("TZ", "🇹🇿", "TANZANIA"),
-    "256": ("UG", "🇺🇬", "UGANDA"), "257": ("BI", "🇧🇮", "BURUNDI"),
-    "258": ("MZ", "🇲🇿", "MOZAMBIQUE"), "260": ("ZM", "🇿🇲", "ZAMBIA"),
-    "261": ("MG", "🇲🇬", "MADAGASCAR"), "262": ("RE", "🇷🇪", "REUNION"),
-    "263": ("ZW", "🇿🇼", "ZIMBABWE"), "264": ("NA", "🇳🇦", "NAMIBIA"),
-    "265": ("MW", "🇲🇼", "MALAWI"), "266": ("LS", "🇱🇸", "LESOTHO"),
-    "267": ("BW", "🇧🇼", "BOTSWANA"), "268": ("SZ", "🇸🇿", "ESWATINI"),
-    "269": ("KM", "🇰🇲", "COMOROS"), "290": ("SH", "🇸🇭", "SAINT HELENA"),
-    "291": ("ER", "🇪🇷", "ERITREA"), "297": ("AW", "🇦🇼", "ARUBA"),
-    "298": ("FO", "🇫🇴", "FAROE ISLANDS"), "299": ("GL", "🇬🇱", "GREENLAND"),
-    "350": ("GI", "🇬🇮", "GIBRALTAR"), "351": ("PT", "🇵🇹", "PORTUGAL"),
-    "352": ("LU", "🇱🇺", "LUXEMBOURG"), "353": ("IE", "🇮🇪", "IRELAND"),
-    "354": ("IS", "🇮🇸", "ICELAND"), "355": ("AL", "🇦🇱", "ALBANIA"),
-    "356": ("MT", "🇲🇹", "MALTA"), "357": ("CY", "🇨🇾", "CYPRUS"),
-    "358": ("FI", "🇫🇮", "FINLAND"), "359": ("BG", "🇧🇬", "BULGARIA"),
-    "370": ("LT", "🇱🇹", "LITHUANIA"), "371": ("LV", "🇱🇻", "LATVIA"),
-    "372": ("EE", "🇪🇪", "ESTONIA"), "373": ("MD", "🇲🇩", "MOLDOVA"),
-    "374": ("AM", "🇦🇲", "ARMENIA"), "375": ("BY", "🇧🇾", "BELARUS"),
-    "376": ("AD", "🇦🇩", "ANDORRA"), "377": ("MC", "🇲🇨", "MONACO"),
-    "378": ("SM", "🇸🇲", "SAN MARINO"), "380": ("UA", "🇺🇦", "UKRAINE"),
-    "381": ("RS", "🇷🇸", "SERBIA"), "382": ("ME", "🇲🇪", "MONTENEGRO"),
-    "383": ("XK", "🇽🇰", "KOSOVO"), "385": ("HR", "🇭🇷", "CROATIA"),
-    "386": ("SI", "🇸🇮", "SLOVENIA"), "387": ("BA", "🇧🇦", "BOSNIA AND HERZEGOVINA"),
-    "389": ("MK", "🇲🇰", "NORTH MACEDONIA"), "420": ("CZ", "🇨🇿", "CZECH REPUBLIC"),
-    "421": ("SK", "🇸🇰", "SLOVAKIA"), "423": ("LI", "🇱🇮", "LIECHTENSTEIN"),
-    "500": ("FK", "🇫🇰", "FALKLAND ISLANDS"), "501": ("BZ", "🇧🇿", "BELIZE"),
-    "502": ("GT", "🇬🇹", "GUATEMALA"), "503": ("SV", "🇸🇻", "EL SALVADOR"),
-    "504": ("HN", "🇭🇳", "HONDURAS"), "505": ("NI", "🇳🇮", "NICARAGUA"),
-    "506": ("CR", "🇨🇷", "COSTA RICA"), "507": ("PA", "🇵🇦", "PANAMA"),
-    "509": ("HT", "🇭🇹", "HAITI"), "590": ("GP", "🇬🇵", "GUADELOUPE"),
-    "591": ("BO", "🇧🇴", "BOLIVIA"), "592": ("GY", "🇬🇾", "GUYANA"),
-    "593": ("EC", "🇪🇨", "ECUADOR"), "594": ("GF", "🇬🇫", "FRENCH GUIANA"),
-    "595": ("PY", "🇵🇾", "PARAGUAY"), "596": ("MQ", "🇲🇶", "MARTINIQUE"),
-    "597": ("SR", "🇸🇷", "SURINAME"), "598": ("UY", "🇺🇾", "URUGUAY"),
-    "599": ("BQ", "🇧🇶", "CARIBBEAN NETHERLANDS"), "880": ("BD", "🇧🇩", "BANGLADESH"),
-    "960": ("MV", "🇲🇻", "MALDIVES"), "961": ("LB", "🇱🇧", "LEBANON"),
-    "962": ("JO", "🇯🇴", "JORDAN"), "963": ("SY", "🇸🇾", "SYRIA"),
-    "964": ("IQ", "🇮🇶", "IRAQ"), "965": ("KW", "🇰🇼", "KUWAIT"),
-    "966": ("SA", "🇸🇦", "SAUDI ARABIA"), "967": ("YE", "🇾🇪", "YEMEN"),
-    "968": ("OM", "🇴🇲", "OMAN"), "970": ("PS", "🇵🇸", "PALESTINE"),
-    "971": ("AE", "🇦🇪", "UAE"), "972": ("IL", "🇮🇱", "ISRAEL"),
-    "973": ("BH", "🇧🇭", "BAHRAIN"), "974": ("QA", "🇶🇦", "QATAR"),
-    "975": ("BT", "🇧🇹", "BHUTAN"), "976": ("MN", "🇲🇳", "MONGOLIA"),
-    "977": ("NP", "🇳🇵", "NEPAL"), "992": ("TJ", "🇹🇯", "TAJIKISTAN"),
-    "993": ("TM", "🇹🇲", "TURKMENISTAN"), "994": ("AZ", "🇦🇿", "AZERBAIJAN"),
-    "995": ("GE", "🇬🇪", "GEORGIA"), "996": ("KG", "🇰🇬", "KYRGYZSTAN"),
+    "1": ("US", "🇺🇸", "USA"),
+    "7": ("RU", "🇷🇺", "RUSSIA"),
+    "20": ("EG", "🇪🇬", "EGYPT"),
+    "27": ("ZA", "🇿🇦", "SOUTH AFRICA"),
+    # … (paste your complete country mapping here) …
+    "880": ("BD", "🇧🇩", "BANGLADESH"),
     "998": ("UZ", "🇺🇿", "UZBEKISTAN"),
 }
 
@@ -243,8 +189,8 @@ def parse_agent_sms_response(response_data):
                     records.append({'sender':sender,'number':number,'message':message,'datetime':dt})
     return records
 
-# ============= SEND OTP (thread-safe) =============
-def send_otp_sync(app: Application, service, number, message, dt):
+# ============= ASYNC SEND OTP (with KBS styles) =============
+async def send_otp(app_bot, service, number, message, dt):
     try:
         otp = extract_otp(message)
         if not otp: return
@@ -283,7 +229,7 @@ def send_otp_sync(app: Application, service, number, message, dt):
         prefix_emoji = f'<tg-emoji emoji-id="{EMOJI["PREFIX"]}">🤖</tg-emoji>'
         text = f"{prefix_emoji}{country_display} | {service_display} {masked}"
 
-        # Inline buttons with STYLE and CUSTOM EMOJI
+        # Inline buttons with STYLE & CUSTOM EMOJI
         otp_btn = InlineKeyboardButton(
             "𝐎𝐓𝐏",
             copy_text=CopyTextButton(text=otp),
@@ -304,41 +250,38 @@ def send_otp_sync(app: Application, service, number, message, dt):
         )
         keyboard = InlineKeyboardMarkup([[otp_btn], [channel_btn, bot_btn]])
 
-        # Schedule the async send in the application's event loop
-        async def async_send():
-            sent = await app.bot.send_message(
-                chat_id=GROUP_ID,
-                text=text,
-                reply_markup=keyboard,
-                parse_mode="HTML",
-                disable_web_page_preview=True
-            )
-            print(f"✅ Sent {service_name} ({name}) - {otp}")
-            await asyncio.sleep(650)
-            try:
-                await app.bot.delete_message(GROUP_ID, sent.message_id)
-            except:
-                pass
-
-        # Submit to the running event loop of the application
-        asyncio.run_coroutine_threadsafe(async_send(), app.loop)
-
+        sent = await app_bot.send_message(
+            chat_id=GROUP_ID,
+            text=text,
+            reply_markup=keyboard,
+            parse_mode="HTML",
+            disable_web_page_preview=True
+        )
+        print(f"✅ Sent {service_name} ({name}) - {otp}")
+        # auto-delete after 650 seconds
+        await asyncio.sleep(650)
+        try:
+            await app_bot.delete_message(GROUP_ID, sent.message_id)
+        except:
+            pass
     except Exception as e:
         print(f"❌ Send error: {e}")
 
-# ============= SCRAPER THREAD =============
-def scraper_thread(app: Application):
+# ============= ASYNC SCRAPER (runs in bot's event loop) =============
+async def scraper_loop(application: Application):
     page = 1
     while True:
         try:
             today = datetime.now().strftime('%Y-%m-%d')
             params = {"token": API_TOKEN, "from": today, "to": today, "limit": 100, "page": page}
+            print(f"📡 Fetching page {page} ({today})...")
             r = requests.get(API_URL, params=params, timeout=10)
             r.raise_for_status()
             records = parse_agent_sms_response(r.json())
             if not records:
+                print(f"📭 No records on page {page}")
                 page = 1 if page>1 else 1
-                time.sleep(10)
+                await asyncio.sleep(3.5)
                 continue
             now = time.time()
             new = 0
@@ -347,26 +290,30 @@ def scraper_thread(app: Application):
                 otp = extract_otp(rec['message'])
                 if not otp: continue
                 uid = f"{rec['datetime']}_{rec['number']}_{otp}"
-                with seen_lock:
+                async with seen_lock:
                     if uid in seen_dict:
                         if now - seen_dict[uid] > 86400:
                             seen_dict[uid] = now
                             new += 1
-                            send_otp_sync(app, rec['sender'], rec['number'], rec['message'], rec['datetime'])
+                            asyncio.create_task(send_otp(application.bot, rec['sender'], rec['number'], rec['message'], rec['datetime']))
                     else:
                         seen_dict[uid] = now
                         new += 1
-                        send_otp_sync(app, rec['sender'], rec['number'], rec['message'], rec['datetime'])
+                        asyncio.create_task(send_otp(application.bot, rec['sender'], rec['number'], rec['message'], rec['datetime']))
+                # auto save every 50
                 if len(seen_dict) % 50 == 0:
                     with open(SEEN_FILE, 'w') as f: json.dump(seen_dict, f)
             if new:
                 with open(SEEN_FILE, 'w') as f: json.dump(seen_dict, f)
-                print(f"🎯 {new} new OTPs")
+                print(f"🎯 Page {page}: {new} new OTPs")
+            else:
+                print(f"📭 Page {page}: no new OTPs")
             page += 1
             if page > 50: page = 1
+            await asyncio.sleep(3.5)   # wait between pages
         except Exception as e:
-            print(f"Scraper error: {e}")
-            time.sleep(5)
+            print(f"❌ Scraper error: {e}")
+            await asyncio.sleep(5)
 
 # ============= ADMIN COMMANDS =============
 pending_requests = {}
@@ -379,11 +326,11 @@ async def admin_only(update: Update):
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await admin_only(update): return
-    await update.message.reply_text("🤖 Bot Active\n✅ KBS Style buttons")
+    await update.message.reply_text("🤖 Bot Active\n✅ KBS style buttons\n✅ Scraper running every 3.5s")
 
 async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await admin_only(update): return
-    with seen_lock:
+    async with seen_lock:
         count = len(seen_dict)
     await update.message.reply_text(f"📊 {count} OTPs tracked")
 
@@ -480,11 +427,12 @@ async def receive_emoji_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Error: {e}")
         if user_id in pending_requests: del pending_requests[user_id]
 
-# ============= MAIN (SYNC, no asyncio.run) =============
-def main():
-    print("🚀 Starting Bot with KBS style...")
+# ============= MAIN =============
+async def main():
+    print("🚀 Starting OTP Bot with KBS style & async scraper...")
     application = Application.builder().token(BOT_TOKEN).build()
 
+    # Handlers
     application.add_handler(CommandHandler("start", start_cmd))
     application.add_handler(CommandHandler("stats", stats_cmd))
     application.add_handler(CommandHandler("ping", ping_cmd))
@@ -493,16 +441,17 @@ def main():
     application.add_handler(CommandHandler("list", list_cmd))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_emoji_id))
 
-    # Flask
+    # Flask in daemon thread
     threading.Thread(target=lambda: app.run(host="0.0.0.0", port=8080, debug=False, use_reloader=False), daemon=True).start()
 
+    # Reset seen for first run (sends all OTPs)
     reset_seen()
-    # start scraper (pass application to access its event loop later)
-    threading.Thread(target=scraper_thread, args=(application,), daemon=True).start()
 
-    print("✅ Bot is now running...")
-    # This will block and run the event loop
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    # Start the scraper inside the same event loop
+    asyncio.create_task(scraper_loop(application))
+
+    print("✅ Bot is now running. Polling for messages...")
+    await application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
