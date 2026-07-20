@@ -117,7 +117,7 @@ def get_service_emoji(country, service):
     if eid: return eid
     return DEFAULT_SERVICE_EMOJIS.get(service.lower())
 
-# ============= SEEN OTP STORAGE ==============
+# ============= SEEN OTP STORAGE (use threading.Lock since scraper is async but accessed from same loop) ==============
 seen_dict = {}
 seen_lock = asyncio.Lock()
 
@@ -126,13 +126,11 @@ def reset_seen():
     seen_dict = {}
     if os.path.exists(SEEN_FILE): os.remove(SEEN_FILE)
 
-# ============= FULL COUNTRY CODE MAP (truncated – use your full 180+ dict) =============
+# ============= FULL COUNTRY CODE MAP (truncated for answer – replace with your full 180+ dict) =============
 COUNTRY_CODE_MAP = {
     "1": ("US", "🇺🇸", "USA"),
     "7": ("RU", "🇷🇺", "RUSSIA"),
-    "20": ("EG", "🇪🇬", "EGYPT"),
-    "27": ("ZA", "🇿🇦", "SOUTH AFRICA"),
-    # … (paste your complete country mapping here) …
+    # … paste your complete map here …
     "880": ("BD", "🇧🇩", "BANGLADESH"),
     "998": ("UZ", "🇺🇿", "UZBEKISTAN"),
 }
@@ -258,7 +256,6 @@ async def send_otp(app_bot, service, number, message, dt):
             disable_web_page_preview=True
         )
         print(f"✅ Sent {service_name} ({name}) - {otp}")
-        # auto-delete after 650 seconds
         await asyncio.sleep(650)
         try:
             await app_bot.delete_message(GROUP_ID, sent.message_id)
@@ -267,7 +264,7 @@ async def send_otp(app_bot, service, number, message, dt):
     except Exception as e:
         print(f"❌ Send error: {e}")
 
-# ============= ASYNC SCRAPER (runs in bot's event loop) =============
+# ============= ASYNC SCRAPER =============
 async def scraper_loop(application: Application):
     page = 1
     while True:
@@ -300,7 +297,6 @@ async def scraper_loop(application: Application):
                         seen_dict[uid] = now
                         new += 1
                         asyncio.create_task(send_otp(application.bot, rec['sender'], rec['number'], rec['message'], rec['datetime']))
-                # auto save every 50
                 if len(seen_dict) % 50 == 0:
                     with open(SEEN_FILE, 'w') as f: json.dump(seen_dict, f)
             if new:
@@ -427,12 +423,12 @@ async def receive_emoji_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Error: {e}")
         if user_id in pending_requests: del pending_requests[user_id]
 
-# ============= MAIN =============
-async def main():
+# ============= MAIN (sync entry point) =============
+def main():
     print("🚀 Starting OTP Bot with KBS style & async scraper...")
     application = Application.builder().token(BOT_TOKEN).build()
 
-    # Handlers
+    # Command handlers
     application.add_handler(CommandHandler("start", start_cmd))
     application.add_handler(CommandHandler("stats", stats_cmd))
     application.add_handler(CommandHandler("ping", ping_cmd))
@@ -441,17 +437,20 @@ async def main():
     application.add_handler(CommandHandler("list", list_cmd))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_emoji_id))
 
-    # Flask in daemon thread
+    # Flask keep-alive in daemon thread
     threading.Thread(target=lambda: app.run(host="0.0.0.0", port=8080, debug=False, use_reloader=False), daemon=True).start()
 
     # Reset seen for first run (sends all OTPs)
     reset_seen()
 
-    # Start the scraper inside the same event loop
-    asyncio.create_task(scraper_loop(application))
+    # Schedule the scraper on the event loop that will be used by run_polling
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.create_task(scraper_loop(application))
 
     print("✅ Bot is now running. Polling for messages...")
-    await application.run_polling(allowed_updates=Update.ALL_TYPES)
+    # application.run_polling() uses and runs the current event loop
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
