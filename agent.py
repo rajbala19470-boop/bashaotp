@@ -4,7 +4,6 @@ import requests
 import re
 import json
 import os
-import signal
 import threading
 from datetime import datetime
 from flask import Flask
@@ -58,6 +57,31 @@ SERVICE_PATTERNS = {
     "Coinbase": [r'coinbase'],
     "Steam": [r'steam'],
     "Roblox": [r'roblox'],
+    "Epic": [r'epic\s*games'],
+    "Apple": [r'apple', r'icloud'],
+    "Microsoft": [r'microsoft', r'outlook'],
+    "Yahoo": [r'yahoo'],
+    "LinkedIn": [r'linkedin'],
+    "Signal": [r'signal'],
+    "Viber": [r'viber'],
+    "Line": [r'line'],
+    "WeChat": [r'wechat', r'weixin'],
+    "Skype": [r'skype'],
+    "Airbnb": [r'airbnb'],
+    "eBay": [r'ebay'],
+    "Shopee": [r'shopee'],
+    "Temu": [r'temu'],
+    "Twitch": [r'twitch'],
+    "Reddit": [r'reddit'],
+    "Pinterest": [r'pinterest'],
+    "Tinder": [r'tinder'],
+    "Bumble": [r'bumble'],
+    "Revolut": [r'revolut'],
+    "Wise": [r'wise'],
+    "Venmo": [r'venmo'],
+    "CashApp": [r'cashapp', r'cash app'],
+    "DoorDash": [r'doordash'],
+    "Lyft": [r'lyft'],
 }
 
 def detect_service(msg):
@@ -87,16 +111,13 @@ def get_country_emoji(country_upper):
     return emoji_data.get("countries", {}).get(country_upper.lower(), {}).get("emoji_id")
 
 def get_service_emoji(country, service):
-    # 1) per‑country service
     eid = emoji_data.get("countries", {}).get(country.lower(), {}).get("services", {}).get(service.lower())
     if eid: return eid
-    # 2) global service
     eid = emoji_data.get("global_services", {}).get(service.lower())
     if eid: return eid
-    # 3) hardcoded default
     return DEFAULT_SERVICE_EMOJIS.get(service.lower())
 
-# ============= SEEN OTP STORAGE ==============
+# ============= SEEN OTP STORAGE (use threading.Lock since scraper is async but accessed from same loop) ==============
 seen_dict = {}
 seen_lock = asyncio.Lock()
 
@@ -105,11 +126,11 @@ def reset_seen():
     seen_dict = {}
     if os.path.exists(SEEN_FILE): os.remove(SEEN_FILE)
 
-# ============= FULL COUNTRY CODE MAP (shortened – use your 180+ map) =============
+# ============= FULL COUNTRY CODE MAP (truncated for answer – replace with your full 180+ dict) =============
 COUNTRY_CODE_MAP = {
     "1": ("US", "🇺🇸", "USA"),
     "7": ("RU", "🇷🇺", "RUSSIA"),
-    # … (paste your full mapping) …
+    # … paste your complete map here …
     "880": ("BD", "🇧🇩", "BANGLADESH"),
     "998": ("UZ", "🇺🇿", "UZBEKISTAN"),
 }
@@ -166,7 +187,7 @@ def parse_agent_sms_response(response_data):
                     records.append({'sender':sender,'number':number,'message':message,'datetime':dt})
     return records
 
-# ============= ASYNC SEND OTP (fixed default emoji for unknown country) =============
+# ============= ASYNC SEND OTP (with KBS styles) =============
 async def send_otp(app_bot, service, number, message, dt):
     try:
         otp = extract_otp(message)
@@ -192,9 +213,8 @@ async def send_otp(app_bot, service, number, message, dt):
             service_emoji_id = get_service_emoji(name, detected)
         else:
             country_display = "<b>??</b>"
+            service_emoji_id = None
             name = "UNKNOWN"
-            # ★ FIX: even for unknown country, look up default/global service emoji
-            service_emoji_id = get_service_emoji("UNKNOWN", detected)
 
         if service_emoji_id:
             service_display = f'<tg-emoji emoji-id="{service_emoji_id}">🔧</tg-emoji>'
@@ -286,7 +306,7 @@ async def scraper_loop(application: Application):
                 print(f"📭 Page {page}: no new OTPs")
             page += 1
             if page > 50: page = 1
-            await asyncio.sleep(3.5)
+            await asyncio.sleep(3.5)   # wait between pages
         except Exception as e:
             print(f"❌ Scraper error: {e}")
             await asyncio.sleep(5)
@@ -403,11 +423,12 @@ async def receive_emoji_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Error: {e}")
         if user_id in pending_requests: del pending_requests[user_id]
 
-# ============= MAIN (with graceful shutdown) =============
-async def main():
-    print("🚀 Starting OTP Bot with KBS style & default emoji fix...")
+# ============= MAIN (sync entry point) =============
+def main():
+    print("🚀 Starting OTP Bot with KBS style & async scraper...")
     application = Application.builder().token(BOT_TOKEN).build()
 
+    # Command handlers
     application.add_handler(CommandHandler("start", start_cmd))
     application.add_handler(CommandHandler("stats", stats_cmd))
     application.add_handler(CommandHandler("ping", ping_cmd))
@@ -416,43 +437,20 @@ async def main():
     application.add_handler(CommandHandler("list", list_cmd))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_emoji_id))
 
-    # Flask keep‑alive
+    # Flask keep-alive in daemon thread
     threading.Thread(target=lambda: app.run(host="0.0.0.0", port=8080, debug=False, use_reloader=False), daemon=True).start()
 
-    # Reset seen on first run
+    # Reset seen for first run (sends all OTPs)
     reset_seen()
 
-    # Start the scraper inside the same event loop
-    loop = asyncio.get_running_loop()
-    scraper_task = asyncio.create_task(scraper_loop(application))
+    # Schedule the scraper on the event loop that will be used by run_polling
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.create_task(scraper_loop(application))
 
-    print("✅ Bot is now running. Press Ctrl+C to stop.")
-
-    # Graceful shutdown on SIGINT/SIGTERM
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
-            loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown(application, scraper_task)))
-        except NotImplementedError:
-            pass
-
-    # Drop pending updates to avoid conflicts from previous runs
-    await application.bot.delete_webhook(drop_pending_updates=True)
-    await application.run_polling(drop_pending_updates=True)
-
-async def shutdown(application, scraper_task):
-    print("\n🛑 Shutting down...")
-    scraper_task.cancel()
-    try:
-        await scraper_task
-    except asyncio.CancelledError:
-        pass
-    # Cancel all remaining tasks
-    tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-    for task in tasks:
-        task.cancel()
-    await asyncio.gather(*tasks, return_exceptions=True)
-    print("✅ Shutdown complete.")
-    asyncio.get_running_loop().stop()
+    print("✅ Bot is now running. Polling for messages...")
+    # application.run_polling() uses and runs the current event loop
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
